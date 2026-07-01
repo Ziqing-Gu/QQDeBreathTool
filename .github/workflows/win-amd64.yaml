@@ -1,10 +1,10 @@
-name: macos intel build
+name: windows amd64 build
 on:
   - push
   - release
 jobs:
   bunddle_app:
-    runs-on: macos-15-intel
+    runs-on: windows-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -17,13 +17,9 @@ jobs:
           python -m pip install -r requirements-qqdebreath.txt
       - name: build app
         run: |
-          python3 -m PyInstaller --noconfirm --windowed --name QQDeBreathTool \
-           --add-data "breath_frame_model.joblib:." \
-           --add-data "debreath_icon.ico:." \
-           -i debreath_icon.ico \
-           debreath_tool_app.py
+          python3 -m PyInstaller --noconfirm --clean .\QQDeBreathTool.spec
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: QQDeBreathTool_MacOS_Intel.zip
-          path: dist/QQDeBreathTool.app
+          name: QQDeBreathTool_Win_amd64.zip
+          path: dist/QQDeBreathTool.exe
