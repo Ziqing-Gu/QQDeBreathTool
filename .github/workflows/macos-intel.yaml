@@ -1,0 +1,28 @@
+name: macos intel build
+on:
+  - push
+  - release
+jobs:
+  bunddle_app:
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Setup python dependency
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+        run: |
+          python -m pip install -r requirements-qqdebreath.txt
+      - name: build app
+        run: |
+          python3 -m PyInstaller --noconfirm --windowed --name QQDeBreathTool \
+           --add-data "breath_frame_model.joblib:." \
+           --add-data "debreath_icon.ico:." \
+           -i debreath_icon.ico \
+           debreath_tool_app.py
+      - name: upload artifact
+        uses: actions/upload-artifact
+        with:
+          name: QQDeBreathTool_MacOS_Intel.zip
+          path: disk/QQDeBreathTool.app
