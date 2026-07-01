@@ -1,7 +1,6 @@
 name: macos arm64 build
 on:
   - push
-  - release
 jobs:
   bunddle_app:
     runs-on: macos-latest

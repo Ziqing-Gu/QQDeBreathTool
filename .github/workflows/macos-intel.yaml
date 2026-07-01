@@ -1,7 +1,6 @@
 name: macos intel build
 on:
   - push
-  - release
 jobs:
   bunddle_app:
     runs-on: macos-15-intel

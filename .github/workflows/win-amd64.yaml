@@ -1,7 +1,6 @@
 name: windows amd64 build
 on:
   - push
-  - release
 jobs:
   bunddle_app:
     runs-on: windows-latest
