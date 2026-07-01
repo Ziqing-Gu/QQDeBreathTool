@@ -25,3 +25,5 @@ cli_analysis_outputs/
 *.tmp
 *.zip
 QQDeBreathTool_payload.zip
+
+**/.DS_Store

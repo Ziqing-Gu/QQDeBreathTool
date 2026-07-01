@@ -1,39 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('breath_frame_model.joblib', '.'), ('debreath_icon.ico', '.')]
-binaries = []
-hiddenimports = [
-    'scipy.ndimage',
-    'scipy.signal',
-    'sklearn.ensemble._hist_gradient_boosting.binning',
-    'sklearn.ensemble._hist_gradient_boosting.common',
-    'sklearn.ensemble._hist_gradient_boosting.gradient_boosting',
-    'sklearn.ensemble._hist_gradient_boosting.grower',
-    'sklearn.ensemble._hist_gradient_boosting.histogram',
-    'sklearn.ensemble._hist_gradient_boosting.predictor',
-    'sklearn.ensemble._hist_gradient_boosting.splitting',
-    'sklearn.pipeline',
-    'sklearn.preprocessing._data',
-    'sklearn.utils._openmp_helpers',
-]
-for package in ('sounddevice', 'soundfile'):
-    tmp_ret = collect_all(package)
-    datas += tmp_ret[0]
-    binaries += tmp_ret[1]
-    hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['debreath_tool_app.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[('breath_frame_model.joblib', '.'), ('debreath_icon.ico', '.')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchaudio', 'torchvision', 'pandas', 'pyarrow', 'matplotlib', 'numba', 'llvmlite', 'h5py', 'PIL', 'IPython', 'tensorflow'],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
@@ -65,4 +42,10 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name='QQDeBreathTool',
+)
+app = BUNDLE(
+    coll,
+    name='QQDeBreathTool.app',
+    icon='debreath_icon.ico',
+    bundle_identifier=None,
 )

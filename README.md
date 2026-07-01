@@ -92,6 +92,7 @@ Example:
 python3 -m PyInstaller --noconfirm --windowed --name QQDeBreathTool \
   --add-data "breath_frame_model.joblib:." \
   --add-data "debreath_icon.ico:." \
+  -i debreath_icon.ico \
   debreath_tool_app.py
 ```
 

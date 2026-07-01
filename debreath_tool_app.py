@@ -74,7 +74,7 @@ for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 
 joblib = None
 np = None
-sd = None
+_ma = None
 sf = None
 ndimage = None
 signal = None
@@ -167,47 +167,30 @@ def ensure_soundfile():
     return sf
 
 
-def ensure_sounddevice():
-    global sd
-    if sd is None:
-        import sounddevice as _sd
+def ensure_miniaudio():
+    global _ma
+    if _ma is None:
+        import miniaudio as _ma_mod
 
-        sd = _sd
-        log_startup("loaded sounddevice")
-    return sd
-
-
-def sane_samplerate(value, fallback):
-    rate = finite_float(value, fallback)
-    if 8000.0 <= rate <= 384000.0:
-        return int(round(rate))
-    return int(round(fallback))
+        _ma = _ma_mod
+        log_startup("loaded miniaudio")
+    return _ma
 
 
-def default_output_samplerate(fallback):
-    try:
-        player = ensure_sounddevice()
-        device = player.query_devices(kind="output")
-        if isinstance(device, dict):
-            return sane_samplerate(device.get("default_samplerate"), fallback)
-    except Exception:
-        log_exception("query default output samplerate failed")
-    return int(round(fallback))
-
-
-def resample_for_playback(audio, source_sr, target_sr):
-    ensure_numpy()
-    source_sr = sane_samplerate(source_sr, source_sr)
-    target_sr = sane_samplerate(target_sr, source_sr)
-    data = np.asarray(audio)
-    if source_sr == target_sr or data.size == 0:
-        return np.ascontiguousarray(data)
-    sig = ensure_scipy_signal()
-    gcd = math.gcd(int(source_sr), int(target_sr))
-    up = int(target_sr // gcd)
-    down = int(source_sr // gcd)
-    out = sig.resample_poly(data, up, down, axis=0)
-    return np.ascontiguousarray(out)
+def _make_audio_generator(audio_f32, nchannels):
+    """Generator that yields raw float32 PCM chunks for miniaudio."""
+    raw = audio_f32.ravel().tobytes()
+    sample_size = 4  # float32 = 4 bytes
+    required_frames = yield b""
+    current = 0
+    total = len(raw)
+    while current < total:
+        byte_count = required_frames * nchannels * sample_size
+        chunk = raw[current:current + byte_count]
+        current += len(chunk)
+        if len(chunk) < byte_count:
+            chunk += b"\x00" * (byte_count - len(chunk))
+        required_frames = yield chunk
 
 
 def ensure_sklearn_model_imports():
@@ -1945,7 +1928,7 @@ class MainWindow(QMainWindow):
         self.play_start_pos = 0.0
         self.playback_audio_length = 0
         self.playback_audio = None
-        self.playback_device_sr = self.sr
+        self.ma_device = None
         self.playback_end_timer = None
         self.updating_class_combo = False
         self.settings = load_settings()
@@ -2613,19 +2596,29 @@ class MainWindow(QMainWindow):
         playback_audio = self.make_playback_audio()
         self.playback_audio = playback_audio
         self.playback_audio_length = len(playback_audio)
-        device_sr = default_output_samplerate(self.sr)
-        self.playback_device_sr = device_sr
-        playback_for_device = resample_for_playback(playback_audio, self.sr, device_sr)
-        device_start_sample = int(round((start_sample / self.sr) * device_sr))
-        device_start_sample = max(0, min(len(playback_for_device) - 1, device_start_sample))
+
+        segment = playback_audio[start_sample:]
+        segment_f32 = np.asarray(segment, dtype=np.float32)
+        if segment_f32.ndim == 1:
+            segment_f32 = segment_f32[:, None]
+        nchannels = segment_f32.shape[1]
+
+        gen = _make_audio_generator(segment_f32, nchannels)
+        next(gen)  # prime the generator
+
+        ma = ensure_miniaudio()
         try:
-            player = ensure_sounddevice()
-            player.play(playback_for_device[device_start_sample:], device_sr, blocking=False)
+            device = ma.PlaybackDevice(
+                output_format=ma.SampleFormat.FLOAT32,
+                nchannels=nchannels,
+                sample_rate=self.sr,
+            )
+            device.start(gen)
+            self.ma_device = device
         except Exception as exc:
             QMessageBox.critical(self, "播放失败", str(exc))
             return
-        if device_sr != self.sr:
-            log_startup(f"playback resampled source_sr={self.sr} output_sr={device_sr}")
+
         self.is_playing = True
         self.play_start_time = time.monotonic()
         self.play_start_pos = start_sample / self.sr
@@ -2678,17 +2671,17 @@ class MainWindow(QMainWindow):
     def stop_playback(self, reset_button=True, return_to_start=False):
         was_playing = self.is_playing
         return_pos = self.play_start_pos
-        if self.is_playing:
+        if self.ma_device is not None:
             try:
-                ensure_sounddevice().stop()
+                self.ma_device.stop()
             except Exception:
                 log_exception("stop_playback failed")
+            self.ma_device = None
         if self.playback_end_timer is not None:
             self.playback_end_timer.stop()
         self.is_playing = False
         self.playback_audio_length = 0
         self.playback_audio = None
-        self.playback_device_sr = self.sr
         self.timer.stop()
         self.monitor_meter.set_level(-80.0, False)
         if reset_button:
