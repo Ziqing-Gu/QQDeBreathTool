@@ -75,17 +75,17 @@ for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 joblib = None
 np = None
 _ma = None
+sd = None
 sf = None
 ndimage = None
 signal = None
 
-from PyQt5.QtCore import Qt, QRectF, QEvent, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QEvent, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
@@ -95,7 +95,6 @@ from PyQt5.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollBar,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -106,14 +105,25 @@ HOP_MS = 5
 DEFAULT_FADE_SECONDS = 0.010
 DEFAULT_BREATH_TARGET_DB = -6.0
 DEFAULT_BREATH_THRESHOLD = 0.86
+DEFAULT_WAV_OUTPUT_SUBTYPE = "PCM_24"
+SAFE_WAV_OUTPUT_SUBTYPES = {
+    "PCM_S8",
+    "PCM_16",
+    "PCM_24",
+    "PCM_32",
+    "FLOAT",
+    "DOUBLE",
+    "ULAW",
+    "ALAW",
+}
 DEFAULT_AUTO_BREATH_MIN_SECONDS = 0.12
 AUTO_BREATH_SHORT_REVIEW_SECONDS = 0.16
 CLASSES = ["Vocal Only", "Breath", "Noize"]
 EDITABLE_CLASSES = ["Breath", "Noize"]
 COLORS = {
-    "Vocal Only": QColor(67, 160, 71, 45),
-    "Breath": QColor(30, 136, 229, 105),
-    "Noize": QColor(251, 140, 0, 105),
+    "Vocal Only": QColor(22, 101, 52, 34),
+    "Breath": QColor(56, 189, 248, 118),
+    "Noize": QColor(245, 158, 11, 122),
 }
 
 
@@ -167,14 +177,58 @@ def ensure_soundfile():
     return sf
 
 
-def ensure_miniaudio():
-    global _ma
-    if _ma is None:
-        import miniaudio as _ma_mod
+def safe_wav_subtype(subtype):
+    """Return a subtype that libsndfile can write into a WAV container."""
+    requested = str(subtype or "").strip()
+    if not requested or requested.upper() in {"UNKNOWN", "N/A", "NOTYPE"}:
+        return DEFAULT_WAV_OUTPUT_SUBTYPE
+    if requested.upper() not in SAFE_WAV_OUTPUT_SUBTYPES:
+        return DEFAULT_WAV_OUTPUT_SUBTYPE
 
-        _ma = _ma_mod
-        log_startup("loaded miniaudio")
-    return _ma
+    try:
+        writer = ensure_soundfile()
+        available = writer.available_subtypes("WAV")
+        if requested in available:
+            return requested
+        requested_upper = requested.upper()
+        for candidate in available:
+            if candidate.upper() == requested_upper:
+                return candidate
+    except Exception:
+        log_exception("checking WAV subtypes failed")
+
+    return DEFAULT_WAV_OUTPUT_SUBTYPE
+
+
+def ensure_sounddevice():
+    global sd
+    if sd is None:
+        import sounddevice as _sd
+
+        sd = _sd
+        log_startup("loaded sounddevice")
+    return sd
+
+
+def default_output_samplerate(fallback_sr):
+    try:
+        sd_mod = ensure_sounddevice()
+        devices = sd_mod.query_devices()
+        default_device = devices[sd_mod.default.device[1]]
+        if default_device and default_device.get("default_samplerate"):
+            return int(default_device["default_samplerate"])
+    except Exception:
+        log_exception("default_output_samplerate failed")
+    return fallback_sr
+
+
+def resample_for_playback(audio, src_sr, dst_sr):
+    if src_sr == dst_sr:
+        return audio.copy()
+    ensure_numpy()
+    ensure_scipy_signal()
+    num_samples = int(audio.shape[0] * dst_sr / src_sr)
+    return signal.resample(audio, num_samples, axis=0)
 
 
 def _make_audio_generator(audio_f32, nchannels):
@@ -309,6 +363,18 @@ class Region:
         return Region(self.start, self.end, self.cls, self.confidence)
 
 
+def core_regions_to_gui_regions(regions):
+    return [
+        Region(
+            float(region.start),
+            float(region.end),
+            str(region.cls),
+            finite_float(getattr(region, "confidence", 1.0), 1.0),
+        )
+        for region in regions
+    ]
+
+
 def app_root() -> Path:
     if hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS)
@@ -327,6 +393,7 @@ def candidate_model_paths():
     paths = [
         app_root() / "breath_frame_model.joblib",
         Path.cwd() / "breath_frame_model.joblib",
+        Path.home() / "Desktop" / "去呼吸" / "breath_frame_model.joblib",
     ]
     return paths
 
@@ -368,6 +435,7 @@ def load_settings():
     defaults = {
         "normalize_breath": False,
         "breath_target_db": DEFAULT_BREATH_TARGET_DB,
+        "breath_gain_db": 0.0,
         "enable_fade": True,
         "fade_in_ms": DEFAULT_FADE_SECONDS * 1000.0,
         "fade_out_ms": DEFAULT_FADE_SECONDS * 1000.0,
@@ -1195,6 +1263,14 @@ def normalize_breath_blocks(data, audio, regions, sr, target_db=-6.0):
     return data
 
 
+def apply_breath_gain(data, gain_db=0.0):
+    gain_db = finite_float(gain_db, 0.0)
+    if abs(gain_db) < 1e-12:
+        return data
+    gain_db = max(-30.0, min(30.0, gain_db))
+    return data * (10.0 ** (gain_db / 20.0))
+
+
 def build_stem_gains(audio_length, sr, regions, fade_in_ms=5.0, fade_out_ms=5.0):
     ensure_numpy()
     duration = audio_length / sr
@@ -1280,6 +1356,7 @@ def export_stems(
     fade_out_ms=5.0,
     normalize_breath=False,
     breath_target_db=-6.0,
+    breath_gain_db=0.0,
 ):
     writer = ensure_soundfile()
     duration = len(audio) / sr
@@ -1288,1531 +1365,40 @@ def export_stems(
     out_paths = {}
     stem = Path(path).stem
     folder = Path(path).parent
+    output_subtype = safe_wav_subtype(subtype)
     for cls, idx in class_id.items():
         data = audio * gains[:, idx][:, None]
         if cls == "Breath" and normalize_breath:
             data = normalize_breath_blocks(data, audio, regions, sr, breath_target_db)
+        if cls == "Breath":
+            data = apply_breath_gain(data, breath_gain_db)
         out = folder / f"{stem}_{cls}.wav"
-        writer.write(str(out), data, sr, subtype=subtype or "PCM_24")
+        writer.write(str(out), data, sr, format="WAV", subtype=output_subtype)
         out_paths[cls] = str(out)
     return out_paths
 
 
-class WaveformWidget(QWidget):
-    selectedChanged = pyqtSignal(int)
-    regionsChanged = pyqtSignal()
-    playheadChanged = pyqtSignal(float)
-    editStarted = pyqtSignal()
-    editFinished = pyqtSignal()
-    viewChanged = pyqtSignal(float, float)
-    regionTypeToggleRequested = pyqtSignal(int)
 
-    def __init__(self):
-        super().__init__()
-        self.audio = None
-        self.sr = 48000
-        self.duration = 1.0
-        self.regions = []
-        self.selected = -1
-        self.view_start = 0.0
-        self.view_end = 1.0
-        self.drag_mode = None
-        self.drag_region = -1
-        self.create_start = None
-        self.temp_end = None
-        self.new_class = "Breath"
-        self.playhead = 0.0
-        self.display_gain = 1.0
-        self.global_fade_in = DEFAULT_FADE_SECONDS
-        self.global_fade_out = DEFAULT_FADE_SECONDS
-        self.normalize_breath_display = False
-        self.breath_target_db = DEFAULT_BREATH_TARGET_DB
-        self.monitor_visible_classes = set(CLASSES)
-        self.hover_region = -1
-        self.hover_edge = None
-        self.setMinimumHeight(260)
-        self.setMouseTracking(True)
 
-    def set_audio(self, audio, sr):
-        ensure_numpy()
-        audio = clean_audio_array(audio)
-        self.audio = np.nan_to_num(np.mean(audio, axis=1), nan=0.0, posinf=0.0, neginf=0.0)
-        self.sr = int(sr) if sr else 48000
-        self.duration = len(self.audio) / sr
-        self.view_start = 0.0
-        self.view_end = self.duration
-        self.selected = -1
-        self.playhead = 0.0
-        self.update()
-        self.viewChanged.emit(self.view_start, self.view_end)
-
-    def set_regions(self, regions):
-        self.regions = regions
-        self.update()
-
-    def set_new_class(self, cls):
-        self.new_class = cls
-
-    def set_playhead(self, t):
-        self.playhead = max(0.0, min(self.duration, float(t)))
-        self.playheadChanged.emit(self.playhead)
-        self.update()
-
-    def set_display_gain(self, gain):
-        self.display_gain = max(0.1, min(64.0, finite_float(gain, 1.0)))
-        self.update()
-
-    def waveform_display_amp(self, samples):
-        if samples.size == 0:
-            return 1e-6
-        abs_samples = np.abs(samples)
-        finite = abs_samples[np.isfinite(abs_samples)]
-        if finite.size == 0:
-            return 1e-6
-        nonzero = finite[finite > 1e-10]
-        source = nonzero if nonzero.size else finite
-        amp = max(
-            finite_float(np.percentile(source, 99.0), 0.0),
-            finite_float(np.percentile(source, 95.0), 0.0) * 1.8,
-            finite_float(np.max(source), 0.0) * 0.18,
-        )
-        return max(amp, 1e-6)
-
-    def waveform_column_bounds(self, samples, cols):
-        if samples.size == 0 or cols <= 0:
-            return np.zeros(0), np.zeros(0), 1e-6
-        lo = np.zeros(cols, dtype=np.float64)
-        hi = np.zeros(cols, dtype=np.float64)
-        peaks = np.zeros(cols, dtype=np.float64)
-        length = len(samples)
-        for x in range(cols):
-            start = int(x * length / cols)
-            end = int((x + 1) * length / cols)
-            if end <= start:
-                end = min(length, start + 1)
-            chunk = samples[start:end]
-            if chunk.size == 0:
-                continue
-            lo[x] = finite_float(np.min(chunk), 0.0)
-            hi[x] = finite_float(np.max(chunk), 0.0)
-            peaks[x] = max(abs(lo[x]), abs(hi[x]))
-        active = peaks[np.isfinite(peaks) & (peaks > 1e-10)]
-        if active.size:
-            amp = max(
-                finite_float(np.percentile(active, 92.0), 0.0),
-                finite_float(np.percentile(active, 75.0), 0.0) * 1.8,
-                finite_float(np.median(active), 0.0) * 3.0,
-                finite_float(np.max(active), 0.0) * 0.035,
-            )
-        else:
-            amp = self.waveform_display_amp(samples)
-        return lo, hi, max(amp, 1e-6)
-
-    def set_view(self, start, end, emit=True):
-        if self.audio is None:
-            return
-        span = max(0.01, float(end) - float(start))
-        span = min(span, self.duration)
-        start = max(0.0, min(self.duration - span, float(start)))
-        end = start + span
-        changed = abs(start - self.view_start) > 1e-9 or abs(end - self.view_end) > 1e-9
-        self.view_start = start
-        self.view_end = end
-        self.update()
-        if emit and changed:
-            self.viewChanged.emit(self.view_start, self.view_end)
-
-    def set_global_fades(self, fade_in_ms, fade_out_ms):
-        self.global_fade_in = max(0.0, float(fade_in_ms)) / 1000.0
-        self.global_fade_out = max(0.0, float(fade_out_ms)) / 1000.0
-        self.update()
-
-    def set_display_processing(self, normalize_breath=False, breath_target_db=DEFAULT_BREATH_TARGET_DB, visible_classes=None):
-        self.normalize_breath_display = bool(normalize_breath)
-        self.breath_target_db = finite_float(breath_target_db, DEFAULT_BREATH_TARGET_DB)
-        self.monitor_visible_classes = set(visible_classes or CLASSES)
-        self.update()
-
-    def time_to_x(self, t):
-        w = max(1, self.width())
-        return int((t - self.view_start) / max(1e-9, self.view_end - self.view_start) * w)
-
-    def x_to_time(self, x):
-        return self.view_start + x / max(1, self.width()) * (self.view_end - self.view_start)
-
-    def regions_touch(self, left, right):
-        if left.cls == right.cls:
-            return False
-        return abs(float(right.start) - float(left.end)) <= max(2.0 / max(1, self.sr), 0.002)
-
-    def draw_fade_x(self, painter, x1, x2, top, bottom):
-        if x2 <= x1:
-            return
-        painter.drawLine(x1, bottom, x2, top)
-        painter.drawLine(x1, top, x2, bottom)
-
-    def class_at_time(self, t):
-        for r in reversed(self.regions):
-            if r.start <= t <= r.end:
-                return r.cls
-        return "Vocal Only"
-
-    def view_samples_for_display(self, start_sample, end_sample):
-        samples = np.asarray(self.audio[start_sample:end_sample], dtype=np.float64).copy()
-        if samples.size:
-            samples = np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0)
-        if not self.normalize_breath_display or samples.size == 0:
-            return samples
-        target_peak = 10.0 ** (self.breath_target_db / 20.0)
-        if target_peak <= 0:
-            return samples
-        for r in self.regions:
-            if r.cls != "Breath":
-                continue
-            region_start = max(0, min(len(self.audio), int(round(r.start * self.sr))))
-            region_end = max(region_start, min(len(self.audio), int(round(r.end * self.sr))))
-            if region_end <= start_sample or region_start >= end_sample:
-                continue
-            source = self.audio[region_start:region_end]
-            peak = float(np.max(np.abs(source))) if source.size else 0.0
-            if peak <= 1e-9:
-                continue
-            a = max(region_start, start_sample) - start_sample
-            b = min(region_end, end_sample) - start_sample
-            samples[a:b] *= target_peak / peak
-        return samples
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(18, 18, 18))
-        painter.fillRect(self.rect(), COLORS["Vocal Only"])
-        mid = self.height() // 2
-        painter.setPen(QPen(QColor(70, 70, 70), 1))
-        painter.drawLine(0, mid, self.width(), mid)
-
-        for i, r in enumerate(self.regions):
-            x1 = self.time_to_x(r.start)
-            x2 = self.time_to_x(r.end)
-            if x2 < 0 or x1 > self.width():
-                continue
-            top = 24
-            bottom = self.height() - 4
-            painter.fillRect(QRectF(x1, 24, max(1, x2 - x1), self.height() - 28), COLORS[r.cls])
-            fade_pen = QPen(QColor(255, 255, 255, 180), 1)
-            painter.setPen(fade_pen)
-            fade_in = min(self.global_fade_in, (r.end - r.start) * 0.5)
-            fade_out = min(self.global_fade_out, (r.end - r.start) * 0.5)
-            touches_left = i > 0 and self.regions_touch(self.regions[i - 1], r)
-            touches_right = i + 1 < len(self.regions) and self.regions_touch(r, self.regions[i + 1])
-            if fade_in > 0 and not touches_left:
-                fx = self.time_to_x(min(r.end, r.start + fade_in))
-                self.draw_fade_x(painter, x1, fx, top, bottom)
-                painter.drawLine(fx, top, fx, bottom)
-            if fade_out > 0 and not touches_right:
-                fx = self.time_to_x(max(r.start, r.end - fade_out))
-                self.draw_fade_x(painter, fx, x2, top, bottom)
-                painter.drawLine(fx, top, fx, bottom)
-            if touches_right:
-                next_region = self.regions[i + 1]
-                boundary = (r.end + next_region.start) * 0.5
-                left_fade = min(self.global_fade_out, (r.end - r.start) * 0.5)
-                right_fade = min(self.global_fade_in, (next_region.end - next_region.start) * 0.5)
-                xa = self.time_to_x(max(r.start, boundary - left_fade))
-                xb = self.time_to_x(min(next_region.end, boundary + right_fade))
-                self.draw_fade_x(painter, xa, xb, top, bottom)
-                painter.drawLine(self.time_to_x(boundary), top, self.time_to_x(boundary), bottom)
-            painter.setBrush(Qt.NoBrush)
-            if i == self.hover_region and self.hover_edge in {"left", "right"}:
-                hx = x1 if self.hover_edge == "left" else x2
-                painter.setPen(QPen(QColor(255, 235, 59), 4))
-                painter.drawLine(hx, 22, hx, self.height())
-            if i == self.selected:
-                painter.setPen(QPen(QColor(255, 255, 255), 2))
-                painter.drawRect(QRectF(x1, 24, max(1, x2 - x1), self.height() - 28))
-
-        if self.drag_mode == "create" and self.create_start is not None and self.temp_end is not None:
-            x1 = self.time_to_x(min(self.create_start, self.temp_end))
-            x2 = self.time_to_x(max(self.create_start, self.temp_end))
-            painter.fillRect(QRectF(x1, 24, max(1, x2 - x1), self.height() - 28), COLORS[self.new_class])
-            painter.setPen(QPen(QColor(255, 255, 255), 1))
-            painter.drawRect(QRectF(x1, 24, max(1, x2 - x1), self.height() - 28))
-
-        if self.audio is not None and len(self.audio) > 0:
-            ensure_numpy()
-            a = int(self.view_start * self.sr)
-            b = int(self.view_end * self.sr)
-            a = max(0, min(len(self.audio) - 1, a))
-            b = max(a + 1, min(len(self.audio), b))
-            samples = self.view_samples_for_display(a, b)
-            cols = max(1, self.width())
-            col_lo, col_hi, amp = self.waveform_column_bounds(samples, cols)
-            display_gain = finite_float(self.display_gain, 1.0)
-            for x in range(cols):
-                if x >= len(col_lo):
-                    continue
-                t = self.x_to_time(x)
-                cls = self.class_at_time(t)
-                if cls in self.monitor_visible_classes:
-                    painter.setPen(QPen(QColor(235, 235, 235), 1))
-                else:
-                    painter.setPen(QPen(QColor(120, 120, 120), 1))
-                lo = col_lo[x] / amp * display_gain
-                hi = col_hi[x] / amp * display_gain
-                if not math.isfinite(lo) or not math.isfinite(hi):
-                    continue
-                y1 = mid - int(np.clip(hi, -1, 1) * (self.height() * 0.42))
-                y2 = mid - int(np.clip(lo, -1, 1) * (self.height() * 0.42))
-                painter.drawLine(x, y1, x, y2)
-
-        if self.view_start <= self.playhead <= self.view_end:
-            x = self.time_to_x(self.playhead)
-            painter.setPen(QPen(QColor(255, 235, 59), 2))
-            painter.drawLine(x, 22, x, self.height())
-
-    def hit_region(self, x):
-        t = self.x_to_time(x)
-        best = -1
-        for i, r in enumerate(self.regions):
-            if r.start <= t <= r.end:
-                best = i
-        return best
-
-    def hit_edge(self, idx, t):
-        if idx < 0 or idx >= len(self.regions):
-            return None
-        r = self.regions[idx]
-        near = max(0.01, 0.006 * (self.view_end - self.view_start))
-        if abs(t - r.start) <= near:
-            return "left"
-        if abs(t - r.end) <= near:
-            return "right"
-        return None
-
-    def update_hover(self, x):
-        idx = self.hit_region(x)
-        edge = self.hit_edge(idx, self.x_to_time(x))
-        changed = idx != self.hover_region or edge != self.hover_edge
-        self.hover_region = idx
-        self.hover_edge = edge
-        if edge in {"left", "right"}:
-            self.setCursor(Qt.SizeHorCursor)
-        elif idx >= 0:
-            self.setCursor(Qt.SizeAllCursor)
-        else:
-            self.unsetCursor()
-        if changed:
-            self.update()
-
-    def mousePressEvent(self, event):
-        t = self.x_to_time(event.x())
-        if event.button() == Qt.RightButton:
-            idx = self.hit_region(event.x())
-            if idx >= 0:
-                self.selected = idx
-                self.selectedChanged.emit(idx)
-                self.regionTypeToggleRequested.emit(idx)
-                self.update()
-                event.accept()
-                return
-            event.accept()
-            return
-        if event.button() != Qt.LeftButton:
-            return
-        self.set_playhead(t)
-        if event.modifiers() & Qt.ShiftModifier:
-            self.editStarted.emit()
-            self.create_start = t
-            self.temp_end = t
-            self.drag_mode = "create"
-            return
-        idx = self.hit_region(event.x())
-        self.selected = idx
-        self.selectedChanged.emit(idx)
-        if idx >= 0:
-            r = self.regions[idx]
-            edge = self.hit_edge(idx, t)
-            if edge == "left":
-                self.drag_mode = "left"
-            elif edge == "right":
-                self.drag_mode = "right"
-            else:
-                self.drag_mode = "move"
-            self.drag_region = idx
-            self.drag_anchor = t
-            self.orig = r.copy()
-            self.editStarted.emit()
-        self.update()
-
-    def mouseMoveEvent(self, event):
-        if self.drag_mode is None:
-            self.update_hover(event.x())
-            return
-        t = max(0.0, min(self.duration, self.x_to_time(event.x())))
-        if self.drag_mode == "create":
-            self.temp_end = t
-            self.update()
-            return
-        if self.drag_region < 0:
-            return
-        r = self.regions[self.drag_region]
-        if self.drag_mode == "left":
-            r.start = min(t, r.end - 0.005)
-        elif self.drag_mode == "right":
-            r.end = max(t, r.start + 0.005)
-        elif self.drag_mode == "move":
-            delta = t - self.drag_anchor
-            dur = self.orig.end - self.orig.start
-            r.start = max(0.0, min(self.duration - dur, self.orig.start + delta))
-            r.end = r.start + dur
-        self.regionsChanged.emit()
-        self.update()
-
-    def mouseReleaseEvent(self, event):
-        if self.drag_mode == "create" and self.create_start is not None:
-            end = self.x_to_time(event.x())
-            a, b = sorted([self.create_start, end])
-            if b - a >= 0.02:
-                self.regions, self.selected = insert_region_with_boundaries(
-                    self.regions,
-                    Region(a, b, self.new_class),
-                    self.duration,
-                )
-                self.regionsChanged.emit()
-                self.selectedChanged.emit(self.selected)
-        self.drag_mode = None
-        self.drag_region = -1
-        self.create_start = None
-        self.temp_end = None
-        self.editFinished.emit()
-        self.update_hover(event.x())
-        self.update()
-
-    def wheelEvent(self, event):
-        if self.audio is None:
-            return
-        span = self.view_end - self.view_start
-        angle_delta = event.angleDelta()
-        if abs(angle_delta.x()) > 0 or abs(angle_delta.y()) > 0:
-            dx = float(angle_delta.x())
-            dy = float(angle_delta.y())
-            uses_physical_wheel = True
-        else:
-            pixel_delta = event.pixelDelta()
-            dx = float(pixel_delta.x())
-            dy = float(pixel_delta.y())
-            uses_physical_wheel = False
-        if (not uses_physical_wheel) and event.inverted():
-            dx = -dx
-            dy = -dy
-        if event.modifiers() & Qt.ShiftModifier:
-            primary_delta = dy if abs(dy) > 1e-9 else dx
-            if abs(primary_delta) < 1e-9:
-                event.accept()
-                return
-            direction = -1.0 if primary_delta > 0 else 1.0
-            step = span * 0.18 * direction
-            start = self.view_start + step
-            self.set_view(start, start + span)
-            event.accept()
-            return
-        center = self.x_to_time(event.x())
-        primary_delta = dy if abs(dy) >= abs(dx) else dx
-        if abs(primary_delta) < 1e-9:
-            event.accept()
-            return
-        factor = 0.8 if primary_delta > 0 else 1.25
-        new_span = max(0.5, min(self.duration, span * factor))
-        ratio = (center - self.view_start) / max(1e-9, span)
-        view_start = max(0.0, min(self.duration - new_span, center - ratio * new_span))
-        self.set_view(view_start, view_start + new_span)
-        event.accept()
-
-
-class DragValueLabel(QLabel):
-    valueChanged = pyqtSignal(float)
-
-    def __init__(self, prefix, value=5.0, minimum=0.0, maximum=500.0, suffix="ms", decimals=1, default=None):
-        super().__init__()
-        self.prefix = prefix
-        self.suffix = suffix
-        self.decimals = int(decimals)
-        self.minimum = float(minimum)
-        self.maximum = float(maximum)
-        self.value = max(self.minimum, min(self.maximum, float(value)))
-        self.default = max(self.minimum, min(self.maximum, float(value if default is None else default)))
-        self.dragging = False
-        self.drag_y = 0
-        self.drag_value = self.value
-        self.setCursor(Qt.SizeVerCursor)
-        self.setMinimumWidth(86)
-        self.setStyleSheet("QLabel { padding: 3px 8px; border: 1px solid #777; background: #262626; color: #f0f0f0; }")
-        self.refresh()
-
-    def refresh(self):
-        self.setText(f"{self.prefix} {self.value:.{self.decimals}f} {self.suffix}")
-
-    def setValue(self, value, emit=False):
-        new_value = max(self.minimum, min(self.maximum, float(value)))
-        if abs(new_value - self.value) < 1e-9:
-            return
-        self.value = new_value
-        self.refresh()
-        if emit:
-            self.valueChanged.emit(self.value)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if event.modifiers() & Qt.AltModifier:
-                self.setValue(self.default, emit=True)
-                return
-            self.dragging = True
-            self.drag_y = event.globalY()
-            self.drag_value = self.value
-            self.grabMouse()
-
-    def mouseMoveEvent(self, event):
-        if not self.dragging:
-            return
-        delta = self.drag_y - event.globalY()
-        step = 0.2 if event.modifiers() & Qt.ShiftModifier else 1.0
-        self.setValue(self.drag_value + delta * step, emit=True)
-
-    def mouseReleaseEvent(self, event):
-        if self.dragging:
-            self.dragging = False
-            self.releaseMouse()
-
-    def mouseDoubleClickEvent(self, event):
-        from PyQt5.QtWidgets import QInputDialog
-
-        value, ok = QInputDialog.getDouble(self, self.prefix, self.suffix, self.value, self.minimum, self.maximum, self.decimals)
-        if ok:
-            self.setValue(value, emit=True)
-
-
-class MeterWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.level_db = -80.0
-        self.clip = False
-        self.setFixedSize(104, 20)
-        self.setToolTip("监听电平表；爆音时显示 CLIP")
-
-    def set_level(self, level_db, clip=False):
-        self.level_db = max(-80.0, min(12.0, float(level_db)))
-        self.clip = bool(clip)
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(28, 28, 28))
-        painter.setPen(QPen(QColor(84, 84, 84), 1))
-        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
-
-        norm = max(0.0, min(1.0, (self.level_db + 60.0) / 60.0))
-        width = int(norm * (self.width() - 2))
-        if self.clip:
-            color = QColor(229, 57, 53)
-        elif self.level_db > -6.0:
-            color = QColor(255, 193, 7)
-        else:
-            color = QColor(76, 175, 80)
-        painter.fillRect(1, 1, width, self.height() - 2, color)
-
-        painter.setPen(QPen(QColor(245, 245, 245), 1))
-        text = "CLIP" if self.clip else f"{self.level_db:.1f} dB"
-        painter.drawText(self.rect(), Qt.AlignCenter, text)
-
-
-class AnalyzeThread(QThread):
-    completed = pyqtSignal(object)
-    failed = pyqtSignal(str)
-    progress = pyqtSignal(int)
-
-    def __init__(self, audio, sr, model_bundle, source_path=None):
-        super().__init__()
-        self.audio = audio
-        self.sr = sr
-        self.model_bundle = model_bundle
-        self.source_path = source_path
-
-    def run(self):
-        try:
-            regions = analyze_regions(
-                self.audio,
-                self.sr,
-                self.model_bundle,
-                detect_noize=False,
-                source_path=self.source_path,
-                progress_callback=self.progress.emit,
-            )
-        except Exception as exc:
-            self.failed.emit(str(exc))
-            return
-        self.completed.emit(regions)
-
-
-class AboutDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("关于 QQDeBreathTool")
-        self.resize(620, 520)
-
-        title = QLabel("QQDeBreathTool")
-        title.setStyleSheet("QLabel { font-size: 22px; font-weight: 700; }")
-
-        warning = QLabel("禁止商用，加 Q 群 692973169 交流")
-        warning.setStyleSheet("QLabel { color: #D32F2F; font-size: 17px; font-weight: 800; padding: 4px 0; }")
-
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setHtml(
-            """
-            <p>QQDeBreathTool 是由混音师顾子青用 Codex 加载 ChatGPT 5.5 制作出来的分离齿音 / 噪音的软件，由程序员刁翔宇帮助编译修正。</p>
-            <p>QQDeBreathTool 是一个面向人声后期处理的呼吸声分离工具，用于辅助将人声素材中的 Breath、Vocal Only 与 Noize 区块进行标记、试听和导出。</p>
-            <p>软件会基于波形能量、频谱特征和区块边界稳定性自动分析呼吸声候选区域，并在分析时显示百分比进度。用户可以手动调整区块边界、修改区块类型，也可以直接右键区块在 Breath 与 Noize 之间快速切换。</p>
-            <p>监听区支持 Voice、Breath、Noize 三路复选监听。未勾选的类型会在波形中以灰色显示，便于判断当前实际听到的内容。Fade 与 Breath Norm 可同步作用于监听；打开 Breath Norm 后，Breath 区块波形也会显示为标准化后的大小。</p>
-            <p>导出时，软件会保持原始音频的时间长度和位置关系，生成可直接重新导入 DAW 工程的分轨文件，方便继续进行音量、EQ、压缩、混响或其他混音处理。</p>
-            <p><b>主要功能：</b></p>
-            <ul>
-              <li>拖入 WAV 等音频文件并显示波形</li>
-              <li>自动分析 Breath 区块</li>
-              <li>手动拖动区块边界与修改类型</li>
-              <li>支持 Breath / Noize 快捷键标记与右键切换</li>
-              <li>支持 Voice、Breath、Noize 复选监听</li>
-              <li>支持监听音量调整与电平 Meter，监听增益不会影响导出文件</li>
-              <li>支持 Shift + 鼠标滚轮左右移动波形视图</li>
-              <li>支持 Shift 拖动数值微调，Alt + 左键恢复默认数值</li>
-              <li>支持全局 Fade In / Fade Out，并可选择是否作用于监听与导出</li>
-              <li>支持 Breath 分段标准化，并可同步显示与监听</li>
-              <li>支持恢复上次打开的音频和已编辑区块</li>
-              <li>导出 Vocal Only、Breath、Noize 三条对齐音频</li>
-            </ul>
-            <p><b>建议用途：</b></p>
-            <p>适合在人声混音前期或精修阶段，用来快速拆分呼吸声、清理非演唱内容，并保留完整时间线，方便在 Cubase、Nuendo、Pro Tools、Logic Pro 等 DAW 中继续处理。</p>
-            <p>Version: 1.02<br>Developer: 顾子青 / 刁翔宇 / Codex / ChatGPT 5.5</p>
-            """
-        )
-
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        buttons.addWidget(close_btn)
-
-        layout = QVBoxLayout()
-        layout.addWidget(title)
-        layout.addWidget(warning)
-        layout.addWidget(text, 1)
-        layout.addLayout(buttons)
-        self.setLayout(layout)
-
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("去呼吸 / 呼吸与噪音分离工具 1.02")
-        icon = app_icon_path()
-        if icon:
-            self.setWindowIcon(QIcon(str(icon)))
-        self.resize(1180, 560)
-        self.setAcceptDrops(True)
-        self.audio = None
-        self.sr = 48000
-        self.subtype = "PCM_24"
-        self.path = None
-        self.model = None
-        self.is_playing = False
-        self.play_start_time = 0.0
-        self.play_start_pos = 0.0
-        self.playback_audio_length = 0
-        self.playback_audio = None
-        self.ma_device = None
-        self.playback_end_timer = None
-        self.updating_class_combo = False
-        self.settings = load_settings()
-        self.undo_stack = []
-        self.redo_stack = []
-        self.drag_snapshot = None
-        self.analysis_thread = None
-        self.analysis_progress = None
-        self.analysis_model = None
-
-        self.wave = WaveformWidget()
-
-        open_btn = QPushButton("打开/拖入音频")
-        self.undo_btn = QPushButton("Undo")
-        self.redo_btn = QPushButton("Redo")
-        self.play_btn = QPushButton("播放")
-        self.play_follow = QCheckBox("跟随")
-        self.play_follow.setChecked(bool(self.settings.get("play_follow", True)))
-        self.play_follow.setToolTip("播放时自动翻动波形视图")
-        self.return_to_play_start = QCheckBox("回起点")
-        self.return_to_play_start.setChecked(bool(self.settings.get("return_to_play_start", False)))
-        self.return_to_play_start.setToolTip("播放自然结束后，播放指针回到本次播放起点")
-        stop_btn = QPushButton("停止")
-        self.analyze_btn = QPushButton("分析")
-        self.analyze_btn.setMinimumWidth(82)
-        self.analyze_btn.setStyleSheet(
-            "QPushButton { background: #2F80ED; color: white; font-weight: 700; "
-            "padding: 5px 12px; border: 1px solid #2368C4; border-radius: 4px; } "
-            "QPushButton:hover { background: #3D8BFA; } "
-            "QPushButton:pressed { background: #2368C4; } "
-            "QPushButton:disabled { background: #5B6B7F; color: #D0D4DA; }"
-        )
-        self.export_btn = QPushButton("导出三轨")
-        self.export_btn.setMinimumWidth(96)
-        self.export_btn.setStyleSheet(
-            "QPushButton { background: #00A676; color: white; font-weight: 700; "
-            "padding: 5px 12px; border: 1px solid #008F67; border-radius: 4px; } "
-            "QPushButton:hover { background: #00B884; } "
-            "QPushButton:pressed { background: #008F67; }"
-        )
-        fit_btn = QPushButton("全览")
-        delete_btn = QPushButton("删除区块")
-        type_label = QLabel("类型:")
-        self.class_combo = QComboBox()
-        self.class_combo.addItems(EDITABLE_CLASSES)
-        monitor_label = QLabel("Monitor:")
-        monitor_label.setMinimumWidth(64)
-        monitor_label.setToolTip("勾选要监听的分轨")
-        self.monitor_voice = QCheckBox("Voice")
-        self.monitor_voice.setChecked(bool(self.settings.get("monitor_voice", True)))
-        self.monitor_breath = QCheckBox("Breath")
-        self.monitor_breath.setChecked(bool(self.settings.get("monitor_breath", True)))
-        self.monitor_noize = QCheckBox("Noize")
-        self.monitor_noize.setChecked(bool(self.settings.get("monitor_noize", True)))
-        self.display_gain = DragValueLabel("显示", 1.0, 0.1, 64.0, "x", 1)
-        self.monitor_gain_db = DragValueLabel(
-            "监听",
-            float(self.settings.get("monitor_gain_db", 0.0)),
-            -20.0,
-            20.0,
-            "dB",
-            1,
-            default=0.0,
-        )
-        self.monitor_gain_db.setToolTip("监听音量；只影响播放监听，不影响导出")
-        self.monitor_meter = MeterWidget()
-        about_btn = QPushButton("关于")
-        self.enable_fade = QCheckBox("Fade")
-        self.enable_fade.setChecked(bool(self.settings.get("enable_fade", True)))
-        self.fade_in_ms = DragValueLabel("In", float(self.settings.get("fade_in_ms", DEFAULT_FADE_SECONDS * 1000.0)), default=DEFAULT_FADE_SECONDS * 1000.0)
-        self.fade_out_ms = DragValueLabel("Out", float(self.settings.get("fade_out_ms", DEFAULT_FADE_SECONDS * 1000.0)), default=DEFAULT_FADE_SECONDS * 1000.0)
-        self.normalize_breath = QCheckBox("Breath Norm")
-        self.normalize_breath.setChecked(bool(self.settings.get("normalize_breath", False)))
-        self.breath_target_db = DragValueLabel(
-            "Breath",
-            float(self.settings.get("breath_target_db", DEFAULT_BREATH_TARGET_DB)),
-            -60.0,
-            0.0,
-            "dB",
-            default=DEFAULT_BREATH_TARGET_DB,
-        )
-        self.region_info = QLabel("未选中区块")
-        self.position_info = QLabel("00:00.000")
-        self.status = QLabel("拖入一个音频文件开始。")
-        self.view_scroll = QScrollBar(Qt.Horizontal)
-        self.view_scroll.setEnabled(False)
-
-        open_btn.clicked.connect(self.open_file_dialog)
-        self.undo_btn.clicked.connect(self.undo)
-        self.redo_btn.clicked.connect(self.redo)
-        self.play_btn.clicked.connect(self.toggle_playback)
-        stop_btn.clicked.connect(lambda: self.stop_playback(return_to_start=True))
-        self.analyze_btn.clicked.connect(self.analyze)
-        self.export_btn.clicked.connect(self.export)
-        about_btn.clicked.connect(self.show_about)
-        fit_btn.clicked.connect(self.fit_view)
-        delete_btn.clicked.connect(self.delete_region)
-        self.class_combo.currentTextChanged.connect(self.class_combo_changed)
-        self.display_gain.valueChanged.connect(self.wave.set_display_gain)
-        self.enable_fade.stateChanged.connect(self.global_fade_changed)
-        self.fade_in_ms.valueChanged.connect(self.global_fade_changed)
-        self.fade_out_ms.valueChanged.connect(self.global_fade_changed)
-        self.normalize_breath.stateChanged.connect(self.monitor_settings_changed)
-        self.breath_target_db.valueChanged.connect(self.monitor_settings_changed)
-        self.play_follow.stateChanged.connect(self.save_user_settings)
-        self.return_to_play_start.stateChanged.connect(self.save_user_settings)
-        self.monitor_voice.stateChanged.connect(self.monitor_settings_changed)
-        self.monitor_breath.stateChanged.connect(self.monitor_settings_changed)
-        self.monitor_noize.stateChanged.connect(self.monitor_settings_changed)
-        self.monitor_gain_db.valueChanged.connect(self.monitor_gain_changed)
-        self.wave.selectedChanged.connect(self.selection_changed)
-        self.wave.regionsChanged.connect(self.regions_changed)
-        self.wave.playheadChanged.connect(self.playhead_changed)
-        self.wave.editStarted.connect(self.begin_region_edit)
-        self.wave.editFinished.connect(self.finish_region_edit)
-        self.wave.viewChanged.connect(self.sync_view_scrollbar)
-        self.wave.regionTypeToggleRequested.connect(self.toggle_region_type_from_wave)
-        self.view_scroll.valueChanged.connect(self.scrollbar_moved)
-
-        self.timer = QTimer(self)
-        self.timer.setInterval(30)
-        self.timer.timeout.connect(self.update_playhead_from_audio)
-        self.playback_end_timer = QTimer(self)
-        self.playback_end_timer.setSingleShot(True)
-        self.playback_end_timer.timeout.connect(self.finish_playback_at_end)
-        self.global_fade_changed()
-        self.update_wave_display_processing()
-        self.update_history_buttons()
-        QTimer.singleShot(0, self.restore_last_session)
-
-        top = QHBoxLayout()
-        for w in [
-            open_btn,
-            self.undo_btn,
-            self.redo_btn,
-            self.analyze_btn,
-            type_label,
-            self.class_combo,
-            delete_btn,
-        ]:
-            top.addWidget(w)
-        top.addStretch(1)
-        for w in [
-            self.enable_fade,
-            self.fade_in_ms,
-            self.fade_out_ms,
-            self.normalize_breath,
-            self.breath_target_db,
-        ]:
-            top.addWidget(w)
-        top.addWidget(self.export_btn)
-
-        transport = QHBoxLayout()
-        for w in [
-            self.play_btn,
-            self.play_follow,
-            self.return_to_play_start,
-            stop_btn,
-            monitor_label,
-            self.monitor_voice,
-            self.monitor_breath,
-            self.monitor_noize,
-            fit_btn,
-            self.display_gain,
-            about_btn,
-        ]:
-            transport.addWidget(w)
-        transport.addStretch(1)
-        transport.addWidget(self.monitor_gain_db)
-        transport.addWidget(self.monitor_meter)
-
-        info = QHBoxLayout()
-        info.addWidget(self.region_info)
-        info.addStretch(1)
-        info.addWidget(self.position_info)
-
-        layout = QVBoxLayout()
-        layout.addLayout(top)
-        layout.addWidget(self.wave, 4)
-        layout.addWidget(self.view_scroll)
-        layout.addLayout(transport)
-        layout.addLayout(info)
-        layout.addWidget(self.status)
-        root = QWidget()
-        root.setLayout(layout)
-        self.setCentralWidget(root)
-        QApplication.instance().installEventFilter(self)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        urls = event.mimeData().urls()
-        if urls:
-            self.load_file(Path(urls[0].toLocalFile()))
-
-    def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择音频文件", "", "Audio Files (*.wav *.aif *.aiff *.flac *.ogg);;All Files (*.*)")
-        if path:
-            self.load_file(Path(path))
-
-    def load_file(self, path, save_session_now=True):
-        try:
-            reader = ensure_soundfile()
-            info = reader.info(str(path))
-            audio, sr = reader.read(str(path), always_2d=True, dtype="float64")
-            audio, audio_report = sanitize_audio_array(audio)
-        except Exception as exc:
-            QMessageBox.critical(self, "读取失败", str(exc))
-            return
-        self.audio = audio
-        self.sr = sr
-        self.subtype = info.subtype if info.subtype else "PCM_24"
-        self.path = Path(path)
-        self.wave.set_audio(audio, sr)
-        self.wave.set_regions([])
-        self.sync_view_scrollbar(self.wave.view_start, self.wave.view_end)
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        self.update_history_buttons()
-        self.selection_changed(-1)
-        self.playhead_changed(0.0)
-        log_startup(
-            f"loaded file={path} sr={sr} channels={audio.shape[1]} duration={len(audio) / sr:.3f} "
-            f"peak={audio_report['peak']:.8f} p99={audio_report['p99']:.8f} "
-            f"invalid={audio_report['invalid_count']} invalid_ratio={audio_report['invalid_ratio']:.6f}"
-        )
-        self.status.setText(f"已加载：{path} | {sr} Hz | {audio.shape[1]} ch | {len(audio) / sr:.3f} s")
-        self.status.setText(self.status.text() + f" | peak {audio_report['peak']:.6f} | p99 {audio_report['p99']:.6f}")
-        if save_session_now:
-            self.save_session()
-
-    def ensure_model(self):
-        if self.model is None:
-            self.model = load_model()
-        return self.model
-
-    def analyze(self):
-        if self.audio is None:
-            return
-        try:
-            model = self.ensure_model()
-        except Exception as exc:
-            QMessageBox.critical(self, "分析失败", str(exc))
-            return
-
-        if self.analysis_thread is not None and self.analysis_thread.isRunning():
-            return
-
-        self.stop_playback()
-        self.analyze_btn.setEnabled(False)
-        self.status.setText("正在分析 Breath，请稍候...")
-        self.analysis_progress = QProgressDialog("正在分析 Breath... 0%", "", 0, 100, self)
-        self.analysis_progress.setWindowTitle("分析中")
-        self.analysis_progress.setWindowFlags(self.analysis_progress.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.analysis_progress.setWindowModality(Qt.WindowModal)
-        self.analysis_progress.setMinimumDuration(0)
-        self.analysis_progress.setCancelButton(None)
-        self.analysis_progress.setValue(0)
-        self.analysis_progress.show()
-
-        if sys.platform == "darwin":
-            self.analysis_model = model
-            QTimer.singleShot(0, self.run_analysis_on_main_thread)
-            return
-
-        self.analysis_thread = AnalyzeThread(self.audio, self.sr, model, self.path)
-        self.analysis_thread.progress.connect(self.analysis_progress_changed)
-        self.analysis_thread.completed.connect(self.analysis_finished)
-        self.analysis_thread.failed.connect(self.analysis_failed)
-        self.analysis_thread.finished.connect(self.analysis_cleanup)
-        self.analysis_thread.start()
-
-    def run_analysis_on_main_thread(self):
-        try:
-            QApplication.processEvents()
-            regions = analyze_regions(
-                self.audio,
-                self.sr,
-                self.analysis_model,
-                detect_noize=False,
-                source_path=self.path,
-                progress_callback=self.analysis_progress_changed,
-            )
-        except Exception as exc:
-            log_exception("mac main-thread analysis failed")
-            self.analysis_failed(str(exc))
-        else:
-            self.analysis_finished(regions)
-        finally:
-            self.analysis_model = None
-            self.analysis_cleanup()
-
-    def analysis_progress_changed(self, value):
-        if self.analysis_progress is None:
-            return
-        value = max(0, min(100, int(value)))
-        self.analysis_progress.setValue(value)
-        self.analysis_progress.setLabelText(f"正在分析 Breath... {value}%")
-        QApplication.processEvents()
-
-    def analysis_finished(self, regions):
-        self.push_undo("Analyze")
-        self.wave.set_regions(regions)
-        self.redo_stack.clear()
-        self.selection_changed(self.wave.selected)
-        self.save_session()
-        breath_count = sum(1 for r in regions if r.cls == "Breath")
-        if breath_count:
-            self.status.setText(f"分析完成：{breath_count} 个 Breath。Noize 已留给手动标记。")
-        else:
-            self.status.setText("分析完成：没有检测到 Breath。可用 Shift 手动画区块。")
-
-    def analysis_failed(self, message):
-        QMessageBox.critical(self, "分析失败", message)
-        self.status.setText("分析失败。")
-
-    def analysis_cleanup(self):
-        if self.analysis_progress is not None:
-            self.analysis_progress.close()
-            self.analysis_progress = None
-        self.analyze_btn.setEnabled(True)
-        if self.analysis_thread is not None:
-            self.analysis_thread.deleteLater()
-            self.analysis_thread = None
-
-    def format_time(self, seconds):
-        seconds = max(0.0, float(seconds))
-        minutes = int(seconds // 60)
-        rem = seconds - minutes * 60
-        return f"{minutes:02d}:{rem:06.3f}"
-
-    def snapshot_regions(self):
-        return {
-            "regions": [region_public_dict(r) for r in self.wave.regions],
-            "selected": self.wave.selected,
-        }
-
-    def restore_snapshot(self, snapshot):
-        self.wave.regions = [
-            Region(float(r["start"]), float(r["end"]), r["cls"], finite_float(r.get("confidence", 1.0), 1.0))
-            for r in snapshot.get("regions", [])
-        ]
-        self.wave.selected = int(snapshot.get("selected", -1))
-        self.wave.regions = normalize_regions(self.wave.regions, self.wave.duration)
-        if self.wave.selected >= len(self.wave.regions):
-            self.wave.selected = -1
-        self.selection_changed(self.wave.selected)
-        self.wave.update()
-        self.update_history_buttons()
-        self.save_session()
-
-    def snapshots_equal(self, a, b):
-        return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
-
-    def push_undo(self, label="Edit"):
-        snap = self.snapshot_regions()
-        if self.undo_stack and self.snapshots_equal(self.undo_stack[-1], snap):
-            return
-        self.undo_stack.append(snap)
-        if len(self.undo_stack) > 100:
-            self.undo_stack.pop(0)
-        self.update_history_buttons()
-
-    def begin_region_edit(self):
-        self.drag_snapshot = self.snapshot_regions()
-
-    def finish_region_edit(self):
-        if self.drag_snapshot is None:
-            return
-        current = self.snapshot_regions()
-        if not self.snapshots_equal(self.drag_snapshot, current):
-            self.undo_stack.append(self.drag_snapshot)
-            if len(self.undo_stack) > 100:
-                self.undo_stack.pop(0)
-            self.redo_stack.clear()
-        self.drag_snapshot = None
-        self.update_history_buttons()
-
-    def undo(self):
-        if not self.undo_stack:
-            return
-        current = self.snapshot_regions()
-        snap = self.undo_stack.pop()
-        self.redo_stack.append(current)
-        self.restore_snapshot(snap)
-
-    def redo(self):
-        if not self.redo_stack:
-            return
-        current = self.snapshot_regions()
-        snap = self.redo_stack.pop()
-        self.undo_stack.append(current)
-        self.restore_snapshot(snap)
-
-    def update_history_buttons(self):
-        if hasattr(self, "undo_btn"):
-            self.undo_btn.setEnabled(bool(self.undo_stack))
-            self.redo_btn.setEnabled(bool(self.redo_stack))
-
-    def selection_changed(self, idx):
-        self.updating_class_combo = True
-        if idx >= 0 and idx < len(self.wave.regions):
-            r = self.wave.regions[idx]
-            self.class_combo.setCurrentText(r.cls)
-            self.region_info.setText(f"已选：{r.cls} | {self.format_time(r.start)} - {self.format_time(r.end)}")
-        else:
-            self.region_info.setText("Shift+拖动新增区块；右键区块切换 Breath/Noize；Shift+滚轮左右移动；数值拖动时 Shift 微调，Alt+左键恢复默认；B/N 改类型，Delete 删除。")
-        self.updating_class_combo = False
-
-    def regions_changed(self):
-        selected_region = None
-        if 0 <= self.wave.selected < len(self.wave.regions):
-            selected_region = self.wave.regions[self.wave.selected].copy()
-        self.wave.regions = normalize_regions(self.wave.regions, self.wave.duration)
-        if selected_region is not None:
-            self.wave.selected = self.find_matching_region_index(selected_region)
-        if self.wave.selected >= len(self.wave.regions):
-            self.wave.selected = -1
-        self.selection_changed(self.wave.selected)
-        self.wave.update()
-        self.save_session()
-
-    def find_matching_region_index(self, target):
-        best = -1
-        best_score = 1e9
-        for i, r in enumerate(self.wave.regions):
-            if r.cls != target.cls:
-                continue
-            score = abs(r.start - target.start) + abs(r.end - target.end)
-            if score < best_score:
-                best = i
-                best_score = score
-        if best_score <= 0.05:
-            return best
-        return -1
-
-    def class_combo_changed(self, cls):
-        self.wave.set_new_class(cls)
-        if self.updating_class_combo:
-            return
-        idx = self.wave.selected
-        if idx < 0 or idx >= len(self.wave.regions):
-            return
-        if self.wave.regions[idx].cls == cls:
-            return
-        self.push_undo("Change Type")
-        self.wave.regions[idx].cls = cls
-        self.redo_stack.clear()
-        self.regions_changed()
-
-    def set_selected_region_type(self, cls):
-        if cls not in EDITABLE_CLASSES:
-            return
-        self.class_combo.setCurrentText(cls)
-        self.wave.set_new_class(cls)
-        idx = self.wave.selected
-        if idx < 0 or idx >= len(self.wave.regions):
-            return
-        if self.wave.regions[idx].cls == cls:
-            return
-        self.push_undo("Change Type")
-        self.wave.regions[idx].cls = cls
-        self.redo_stack.clear()
-        self.regions_changed()
-        self.status.setText(f"已设为 {cls}。")
-
-    def toggle_region_type_from_wave(self, idx):
-        if idx < 0 or idx >= len(self.wave.regions):
-            return
-        current = self.wave.regions[idx].cls
-        next_cls = "Noize" if current == "Breath" else "Breath"
-        self.set_selected_region_type(next_cls)
-
-    def monitor_visible_classes(self):
-        visible = set()
-        if self.monitor_voice.isChecked():
-            visible.add("Vocal Only")
-        if self.monitor_breath.isChecked():
-            visible.add("Breath")
-        if self.monitor_noize.isChecked():
-            visible.add("Noize")
-        return visible
-
-    def update_wave_display_processing(self):
-        self.wave.set_display_processing(
-            self.normalize_breath.isChecked(),
-            self.breath_target_db.value,
-            self.monitor_visible_classes(),
-        )
-
-    def global_fade_changed(self, *args):
-        if self.enable_fade.isChecked():
-            self.wave.set_global_fades(self.fade_in_ms.value, self.fade_out_ms.value)
-        else:
-            self.wave.set_global_fades(0.0, 0.0)
-        self.save_user_settings()
-        self.update_wave_display_processing()
-        if self.is_playing:
-            self.start_playback()
-
-    def save_user_settings(self, *args):
-        self.settings["normalize_breath"] = bool(self.normalize_breath.isChecked())
-        self.settings["breath_target_db"] = float(self.breath_target_db.value)
-        self.settings["enable_fade"] = bool(self.enable_fade.isChecked())
-        self.settings["fade_in_ms"] = float(self.fade_in_ms.value)
-        self.settings["fade_out_ms"] = float(self.fade_out_ms.value)
-        self.settings["play_follow"] = bool(self.play_follow.isChecked())
-        self.settings["return_to_play_start"] = bool(self.return_to_play_start.isChecked())
-        self.settings["monitor_voice"] = bool(self.monitor_voice.isChecked())
-        self.settings["monitor_breath"] = bool(self.monitor_breath.isChecked())
-        self.settings["monitor_noize"] = bool(self.monitor_noize.isChecked())
-        self.settings["monitor_gain_db"] = float(self.monitor_gain_db.value)
-        save_settings(self.settings)
-
-    def save_session(self):
-        if self.path is None:
-            return
-        self.settings["last_file"] = str(self.path)
-        self.settings["last_regions"] = [region_public_dict(r) for r in self.wave.regions]
-        save_settings(self.settings)
-
-    def restore_last_session(self):
-        last_file = self.settings.get("last_file")
-        if not last_file:
-            return
-        path = Path(last_file)
-        if not path.exists():
-            QMessageBox.warning(self, "找不到上次的音频文件", f"上次打开的文件不存在：\n{path}")
-            self.settings["last_file"] = ""
-            self.settings["last_regions"] = []
-            save_settings(self.settings)
-            return
-        saved_regions = list(self.settings.get("last_regions", []))
-        self.load_file(path, save_session_now=False)
-        regions = []
-        for item in saved_regions:
-            try:
-                regions.append(
-                    Region(
-                        float(item["start"]),
-                        float(item["end"]),
-                        item["cls"],
-                        finite_float(item.get("confidence", 1.0), 1.0),
-                    )
-                )
-            except Exception:
-                pass
-        self.wave.set_regions(normalize_regions(regions, self.wave.duration))
-        self.selection_changed(-1)
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        self.update_history_buttons()
-        self.status.setText(f"已恢复上次会话：{path}")
-        self.save_session()
-
-    def playhead_changed(self, pos):
-        self.position_info.setText(self.format_time(pos))
-        if self.is_playing and abs(pos - (self.play_start_pos + (time.monotonic() - self.play_start_time))) > 0.12:
-            self.start_playback()
-
-    def delete_region(self):
-        idx = self.wave.selected
-        if idx >= 0 and idx < len(self.wave.regions):
-            self.push_undo("Delete Region")
-            self.wave.regions.pop(idx)
-            self.wave.selected = -1
-            self.redo_stack.clear()
-            self.regions_changed()
-            self.status.setText("已删除选中区块。")
-
-    def fit_view(self):
-        if self.audio is not None:
-            self.wave.set_view(0.0, self.wave.duration)
-
-    def sync_view_scrollbar(self, start, end):
-        duration = max(0.0, float(self.wave.duration))
-        span = max(0.0, float(end) - float(start))
-        scale = 1000
-        max_value = max(0, int(round((duration - span) * scale)))
-        page_step = max(1, int(round(span * scale)))
-        value = max(0, min(max_value, int(round(float(start) * scale))))
-        self.view_scroll.blockSignals(True)
-        self.view_scroll.setRange(0, max_value)
-        self.view_scroll.setPageStep(page_step)
-        self.view_scroll.setSingleStep(max(1, int(round(0.05 * scale))))
-        self.view_scroll.setValue(value)
-        self.view_scroll.setEnabled(max_value > 0)
-        self.view_scroll.blockSignals(False)
-
-    def scrollbar_moved(self, value):
-        if self.audio is None:
-            return
-        scale = 1000
-        span = self.wave.view_end - self.wave.view_start
-        start = float(value) / scale
-        self.wave.set_view(start, start + span, emit=False)
-
-    def export(self):
-        if self.audio is None or self.path is None:
-            return
-        folder = QFileDialog.getExistingDirectory(self, "选择导出文件夹", str(self.path.parent))
-        if not folder:
-            return
-        temp_path = Path(folder) / self.path.name
-        try:
-            fade_in = self.fade_in_ms.value if self.enable_fade.isChecked() else 0.0
-            fade_out = self.fade_out_ms.value if self.enable_fade.isChecked() else 0.0
-            out = export_stems(
-                temp_path,
-                self.audio,
-                self.sr,
-                self.subtype,
-                self.wave.regions,
-                fade_in,
-                fade_out,
-                self.normalize_breath.isChecked(),
-                self.breath_target_db.value,
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "导出失败", str(exc))
-            return
-        QMessageBox.information(self, "导出完成", "\n".join(out.values()))
-
-    def toggle_playback(self):
-        if self.is_playing:
-            self.stop_playback(return_to_start=True)
-        else:
-            self.start_playback()
-
-    def monitor_settings_changed(self, *args):
-        self.save_user_settings()
-        self.update_wave_display_processing()
-        if self.is_playing:
-            self.start_playback()
-
-    def monitor_gain_changed(self, value):
-        self.save_user_settings()
-        if self.is_playing:
-            self.start_playback()
-
-    def show_about(self):
-        AboutDialog(self).exec_()
-
-    def follow_playhead_if_needed(self, pos):
-        if not self.play_follow.isChecked() or self.audio is None:
-            return
-        start = self.wave.view_start
-        end = self.wave.view_end
-        span = max(0.5, end - start)
-        if span >= self.wave.duration - 1e-6:
-            return
-        if pos < start or pos >= end:
-            new_start = max(0.0, min(self.wave.duration - span, pos))
-            self.wave.set_view(new_start, new_start + span)
-
-    def start_playback(self):
-        if self.audio is None:
-            return
-        self.stop_playback(reset_button=False)
-        start_sample = int(round(self.wave.playhead * self.sr))
-        start_sample = max(0, min(len(self.audio) - 1, start_sample))
-        self.follow_playhead_if_needed(start_sample / self.sr)
-        playback_audio = self.make_playback_audio()
-        self.playback_audio = playback_audio
-        self.playback_audio_length = len(playback_audio)
-
-        segment = playback_audio[start_sample:]
-        segment_f32 = np.asarray(segment, dtype=np.float32)
-        if segment_f32.ndim == 1:
-            segment_f32 = segment_f32[:, None]
-        nchannels = segment_f32.shape[1]
-
-        gen = _make_audio_generator(segment_f32, nchannels)
-        next(gen)  # prime the generator
-
-        ma = ensure_miniaudio()
-        try:
-            device = ma.PlaybackDevice(
-                output_format=ma.SampleFormat.FLOAT32,
-                nchannels=nchannels,
-                sample_rate=self.sr,
-            )
-            device.start(gen)
-            self.ma_device = device
-        except Exception as exc:
-            QMessageBox.critical(self, "播放失败", str(exc))
-            return
-
-        self.is_playing = True
-        self.play_start_time = time.monotonic()
-        self.play_start_pos = start_sample / self.sr
-        self.play_btn.setText("暂停")
-        self.timer.start()
-        remaining_ms = max(1, int(round((len(playback_audio) - start_sample) / self.sr * 1000.0)) - 3)
-        self.playback_end_timer.start(remaining_ms)
-
-    def apply_monitor_gain(self, data):
-        gain = 10 ** (self.monitor_gain_db.value / 20.0)
-        return data * gain
-
-    def make_playback_audio(self):
-        ensure_numpy()
-        if not any(
-            [
-                self.monitor_voice.isChecked(),
-                self.monitor_breath.isChecked(),
-                self.monitor_noize.isChecked(),
-            ]
-        ):
-            return np.zeros_like(self.audio)
-        fade_in = self.fade_in_ms.value if self.enable_fade.isChecked() else 0.0
-        fade_out = self.fade_out_ms.value if self.enable_fade.isChecked() else 0.0
-        gains, class_id = build_stem_gains(
-            len(self.audio),
-            self.sr,
-            self.wave.regions,
-            fade_in,
-            fade_out,
-        )
-        data = np.zeros_like(self.audio)
-        if self.monitor_voice.isChecked():
-            data += self.audio * gains[:, class_id["Vocal Only"]][:, None]
-        if self.monitor_breath.isChecked():
-            breath = self.audio * gains[:, class_id["Breath"]][:, None]
-            if self.normalize_breath.isChecked():
-                breath = normalize_breath_blocks(
-                    breath.copy(),
-                    self.audio,
-                    self.wave.regions,
-                    self.sr,
-                    self.breath_target_db.value,
-                )
-            data += breath
-        if self.monitor_noize.isChecked():
-            data += self.audio * gains[:, class_id["Noize"]][:, None]
-        return self.apply_monitor_gain(data)
-
-    def stop_playback(self, reset_button=True, return_to_start=False):
-        was_playing = self.is_playing
-        return_pos = self.play_start_pos
-        if self.ma_device is not None:
-            try:
-                self.ma_device.stop()
-            except Exception:
-                log_exception("stop_playback failed")
-            self.ma_device = None
-        if self.playback_end_timer is not None:
-            self.playback_end_timer.stop()
-        self.is_playing = False
-        self.playback_audio_length = 0
-        self.playback_audio = None
-        self.timer.stop()
-        self.monitor_meter.set_level(-80.0, False)
-        if reset_button:
-            self.play_btn.setText("播放")
-        if was_playing and return_to_start and self.return_to_play_start.isChecked() and self.audio is not None:
-            self.wave.set_playhead(return_pos)
-            self.follow_playhead_if_needed(return_pos)
-
-    def finish_playback_at_end(self):
-        if not self.is_playing or self.audio is None:
-            return
-        if self.return_to_play_start.isChecked():
-            self.stop_playback(return_to_start=True)
-            return
-        duration = (self.playback_audio_length or len(self.audio)) / self.sr
-        self.wave.set_playhead(duration)
-        self.follow_playhead_if_needed(duration)
-        self.update_monitor_meter(duration)
-        self.stop_playback()
-
-    def update_monitor_meter(self, pos):
-        if self.audio is None:
-            self.monitor_meter.set_level(-80.0, False)
-            return
-        start = max(0, int(round(pos * self.sr)))
-        window = max(1, int(round(0.08 * self.sr)))
-        end = min(len(self.audio), start + window)
-        if end <= start:
-            self.monitor_meter.set_level(-80.0, False)
-            return
-        source = self.playback_audio
-        if source is None:
-            source = self.make_playback_audio()
-        chunk = source[start:end]
-        peak = float(np.max(np.abs(chunk))) if chunk.size else 0.0
-        db = 20.0 * np.log10(max(peak, 1e-12))
-        self.monitor_meter.set_level(db, peak >= 1.0)
-
-    def update_playhead_from_audio(self):
-        if not self.is_playing or self.audio is None:
-            return
-        pos = self.play_start_pos + (time.monotonic() - self.play_start_time)
-        playback_duration = (self.playback_audio_length or len(self.audio)) / self.sr
-        if pos >= playback_duration:
-            pos = playback_duration
-            if self.return_to_play_start.isChecked():
-                self.stop_playback(return_to_start=True)
-                return
-            self.stop_playback()
-        self.wave.set_playhead(pos)
-        self.follow_playhead_if_needed(pos)
-        self.update_monitor_meter(pos)
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.KeyPress:
-            if event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier and not event.isAutoRepeat():
-                if event.modifiers() & Qt.ShiftModifier:
-                    self.redo()
-                else:
-                    self.undo()
-                return True
-            if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-                self.toggle_playback()
-                return True
-            if event.key() == Qt.Key_Delete and not event.isAutoRepeat():
-                self.delete_region()
-                return True
-            if event.key() == Qt.Key_B and not event.isAutoRepeat():
-                self.set_selected_region_type("Breath")
-                return True
-            if event.key() == Qt.Key_N and not event.isAutoRepeat():
-                self.set_selected_region_type("Noize")
-                return True
-        return super().eventFilter(obj, event)
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier and not event.isAutoRepeat():
-            if event.modifiers() & Qt.ShiftModifier:
-                self.redo()
-            else:
-                self.undo()
-            event.accept()
-            return
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self.toggle_playback()
-            event.accept()
-            return
-        if event.key() == Qt.Key_Delete and not event.isAutoRepeat():
-            self.delete_region()
-            event.accept()
-            return
-        if event.key() == Qt.Key_B and not event.isAutoRepeat():
-            self.set_selected_region_type("Breath")
-            event.accept()
-            return
-        if event.key() == Qt.Key_N and not event.isAutoRepeat():
-            self.set_selected_region_type("Noize")
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def closeEvent(self, event):
-        self.stop_playback()
-        super().closeEvent(event)
-
+from qq_debreath.gui.main_window import MainWindow
 
 def cli_analyze(args):
-    bundle = load_model(args.model)
-    reader = ensure_soundfile()
-    info = reader.info(str(args.input))
-    audio, sr = reader.read(str(args.input), always_2d=True, dtype="float64")
-    audio = clean_audio_array(audio)
-    regions = analyze_regions(audio, sr, bundle, source_path=args.input)
     if args.out_dir:
         out_dir = Path(args.out_dir)
     else:
         out_dir = Path.cwd() / "cli_analysis_outputs"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    temp_input = out_dir / Path(args.input).name
-    out = export_stems(temp_input, audio, sr, info.subtype or "PCM_24", regions)
-    report = {
-        "input": str(args.input),
-        "regions": [region_public_dict(r) for r in regions],
-        "exports": out,
-    }
-    report_path = out_dir / (Path(args.input).stem + "_analysis_report.json")
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"regions": len(regions), "report": str(report_path), "exports": out}, ensure_ascii=False, indent=2))
+    from qq_debreath.core.facade import analyze_file_to_directory
+
+    result = analyze_file_to_directory(args.input, out_dir, model_path=args.model, params=None)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze-for-plugin":
+        from qq_debreath.cli.analyze_for_plugin import main as plugin_cli_main
+
+        raise SystemExit(plugin_cli_main(sys.argv[2:]))
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--analyze-only", action="store_true")
     parser.add_argument("--input", type=Path)
