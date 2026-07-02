@@ -7,3 +7,4 @@ scikit-learn==1.2.1
 joblib==1.2.0
 pyinstaller==6.21.0
 Pillow
+miniaudio
