@@ -4,6 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [('breath_frame_model.joblib', '.'), ('debreath_icon.ico', '.')]
 binaries = []
 hiddenimports = [
+    'debreath_tool_app',
     'scipy.ndimage',
     'scipy.signal',
     'sklearn.ensemble._hist_gradient_boosting.binning',
