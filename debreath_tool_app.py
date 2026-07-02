@@ -74,7 +74,8 @@ for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 
 joblib = None
 np = None
-sd = None
+_ma = None
+_player = None
 sf = None
 ndimage = None
 signal = None
@@ -199,47 +200,88 @@ def safe_wav_subtype(subtype):
     return DEFAULT_WAV_OUTPUT_SUBTYPE
 
 
+class MiniAudioPlayer:
+    def __init__(self):
+        self._device = None
+
+    def play(self, audio, sample_rate, blocking=False):
+        self.stop()
+        ma = ensure_miniaudio()
+        audio_f32 = np.asarray(audio, dtype=np.float32)
+        nchannels = 1 if audio_f32.ndim == 1 else audio_f32.shape[1]
+        gen = _make_audio_generator(audio_f32, nchannels)
+        next(gen)  # prime the generator
+        self._device = ma.PlaybackDevice(
+            output_format=ma.SampleFormat.FLOAT32,
+            nchannels=nchannels,
+            sample_rate=int(sample_rate),
+            buffersize_msec=100,
+        )
+        self._device.start(gen)
+
+    def stop(self):
+        if self._device is not None:
+            try:
+                self._device.stop()
+                self._device.close()
+            except Exception:
+                pass
+            self._device = None
+
+
+def ensure_miniaudio():
+    global _ma
+    if _ma is None:
+        import miniaudio as _ma_mod
+
+        _ma = _ma_mod
+        log_startup("loaded miniaudio")
+    return _ma
+
+
 def ensure_sounddevice():
-    global sd
-    if sd is None:
-        import sounddevice as _sd
-
-        sd = _sd
-        log_startup("loaded sounddevice")
-    return sd
+    global _player
+    if _player is None:
+        ensure_miniaudio()
+        _player = MiniAudioPlayer()
+    return _player
 
 
-def sane_samplerate(value, fallback):
-    rate = finite_float(value, fallback)
-    if 8000.0 <= rate <= 384000.0:
-        return int(round(rate))
-    return int(round(fallback))
-
-
-def default_output_samplerate(fallback):
+def default_output_samplerate(fallback_sr):
     try:
-        player = ensure_sounddevice()
-        device = player.query_devices(kind="output")
-        if isinstance(device, dict):
-            return sane_samplerate(device.get("default_samplerate"), fallback)
+        ma = ensure_miniaudio()
+        devices = ma.Devices()
+        playbacks = devices.get_playbacks()
+        if playbacks and playbacks[0].get("formats"):
+            return int(playbacks[0]["formats"][0]["samplerate"])
     except Exception:
-        log_exception("query default output samplerate failed")
-    return int(round(fallback))
+        log_exception("default_output_samplerate failed")
+    return fallback_sr
 
 
-def resample_for_playback(audio, source_sr, target_sr):
+def resample_for_playback(audio, src_sr, dst_sr):
+    if src_sr == dst_sr:
+        return audio.copy()
     ensure_numpy()
-    source_sr = sane_samplerate(source_sr, source_sr)
-    target_sr = sane_samplerate(target_sr, source_sr)
-    data = np.asarray(audio)
-    if source_sr == target_sr or data.size == 0:
-        return np.ascontiguousarray(data)
-    sig = ensure_scipy_signal()
-    gcd = math.gcd(int(source_sr), int(target_sr))
-    up = int(target_sr // gcd)
-    down = int(source_sr // gcd)
-    out = sig.resample_poly(data, up, down, axis=0)
-    return np.ascontiguousarray(out)
+    ensure_scipy_signal()
+    num_samples = int(audio.shape[0] * dst_sr / src_sr)
+    return signal.resample(audio, num_samples, axis=0)
+
+
+def _make_audio_generator(audio_f32, nchannels):
+    """Generator that yields raw float32 PCM chunks for miniaudio."""
+    raw = audio_f32.ravel().tobytes()
+    sample_size = 4  # float32 = 4 bytes
+    required_frames = yield b""
+    current = 0
+    total = len(raw)
+    while current < total:
+        byte_count = required_frames * nchannels * sample_size
+        chunk = raw[current:current + byte_count]
+        current += len(chunk)
+        if len(chunk) < byte_count:
+            chunk += b"\x00" * (byte_count - len(chunk))
+        required_frames = yield chunk
 
 
 def ensure_sklearn_model_imports():
