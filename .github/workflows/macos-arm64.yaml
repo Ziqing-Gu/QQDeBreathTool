@@ -16,11 +16,7 @@ jobs:
           python -m pip install -r requirements-qqdebreath.txt
       - name: build app
         run: |
-          python3 -m PyInstaller --noconfirm --windowed --name QQDeBreathTool \
-           --add-data "breath_frame_model.joblib:." \
-           --add-data "debreath_icon.ico:." \
-           -i debreath_icon.ico \
-           debreath_tool_app.py
+          python3 -m PyInstaller --noconfirm --clean QQDeBreathTool.spec
       - name: prepare dmg
         run: |
           mkdir dmg_structure

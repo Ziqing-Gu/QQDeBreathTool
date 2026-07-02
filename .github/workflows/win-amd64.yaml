@@ -17,8 +17,11 @@ jobs:
       - name: build app
         run: |
           python3 -m PyInstaller --noconfirm --clean .\QQDeBreathTool.spec
+      - name: zip artifact
+        run: |
+          Compress-Archive -Path dist\QQDeBreathTool -DestinationPath QQDeBreathTool_Win_amd64.zip
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: QQDeBreathTool_Win_amd64
-          path: dist/QQDeBreathTool
+          archive: false
+          path: QQDeBreathTool_Win_amd64.zip
