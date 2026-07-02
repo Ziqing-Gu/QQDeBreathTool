@@ -87,14 +87,6 @@ def clean_audio_array(*args, **kwargs):
     return _legacy().clean_audio_array(*args, **kwargs)
 
 
-def default_output_samplerate(*args, **kwargs):
-    return _legacy().default_output_samplerate(*args, **kwargs)
-
-
-def resample_for_playback(*args, **kwargs):
-    return _legacy().resample_for_playback(*args, **kwargs)
-
-
 def normalize_regions(*args, **kwargs):
     return _legacy().normalize_regions(*args, **kwargs)
 
@@ -868,19 +860,13 @@ class MainWindow(QMainWindow):
         playback_audio = self.make_playback_audio()
         self.playback_audio = playback_audio
         self.playback_audio_length = len(playback_audio)
-        device_sr = default_output_samplerate(self.sr)
-        self.playback_device_sr = device_sr
-        playback_for_device = resample_for_playback(playback_audio, self.sr, device_sr)
-        device_start_sample = int(round((start_sample / self.sr) * device_sr))
-        device_start_sample = max(0, min(len(playback_for_device) - 1, device_start_sample))
+        self.playback_device_sr = self.sr
         try:
             player = ensure_sounddevice()
-            player.play(playback_for_device[device_start_sample:], device_sr, blocking=False)
+            player.play(playback_audio[start_sample:], self.sr, blocking=False)
         except Exception as exc:
             QMessageBox.critical(self, "播放失败", str(exc))
             return
-        if device_sr != self.sr:
-            log_startup(f"playback resampled source_sr={self.sr} output_sr={device_sr}")
         self.is_playing = True
         self.play_start_time = time.monotonic()
         self.play_start_pos = start_sample / self.sr

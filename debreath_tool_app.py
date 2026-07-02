@@ -75,7 +75,7 @@ for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 joblib = None
 np = None
 _ma = None
-sd = None
+_player = None
 sf = None
 ndimage = None
 signal = None
@@ -200,23 +200,60 @@ def safe_wav_subtype(subtype):
     return DEFAULT_WAV_OUTPUT_SUBTYPE
 
 
-def ensure_sounddevice():
-    global sd
-    if sd is None:
-        import sounddevice as _sd
+class MiniAudioPlayer:
+    def __init__(self):
+        self._device = None
 
-        sd = _sd
-        log_startup("loaded sounddevice")
-    return sd
+    def play(self, audio, sample_rate, blocking=False):
+        self.stop()
+        ma = ensure_miniaudio()
+        audio_f32 = np.asarray(audio, dtype=np.float32)
+        nchannels = 1 if audio_f32.ndim == 1 else audio_f32.shape[1]
+        gen = _make_audio_generator(audio_f32, nchannels)
+        next(gen)  # prime the generator
+        self._device = ma.PlaybackDevice(
+            output_format=ma.SampleFormat.FLOAT32,
+            nchannels=nchannels,
+            sample_rate=int(sample_rate),
+            buffersize_msec=100,
+        )
+        self._device.start(gen)
+
+    def stop(self):
+        if self._device is not None:
+            try:
+                self._device.stop()
+                self._device.close()
+            except Exception:
+                pass
+            self._device = None
+
+
+def ensure_miniaudio():
+    global _ma
+    if _ma is None:
+        import miniaudio as _ma_mod
+
+        _ma = _ma_mod
+        log_startup("loaded miniaudio")
+    return _ma
+
+
+def ensure_sounddevice():
+    global _player
+    if _player is None:
+        ensure_miniaudio()
+        _player = MiniAudioPlayer()
+    return _player
 
 
 def default_output_samplerate(fallback_sr):
     try:
-        sd_mod = ensure_sounddevice()
-        devices = sd_mod.query_devices()
-        default_device = devices[sd_mod.default.device[1]]
-        if default_device and default_device.get("default_samplerate"):
-            return int(default_device["default_samplerate"])
+        ma = ensure_miniaudio()
+        devices = ma.Devices()
+        playbacks = devices.get_playbacks()
+        if playbacks and playbacks[0].get("formats"):
+            return int(playbacks[0]["formats"][0]["samplerate"])
     except Exception:
         log_exception("default_output_samplerate failed")
     return fallback_sr

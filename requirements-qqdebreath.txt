@@ -1,10 +1,9 @@
 PyQt5
 numpy==1.23.5
 scipy==1.10.1
-sounddevice==0.4.6
 soundfile==0.12.1
 scikit-learn==1.2.1
 joblib==1.2.0
 pyinstaller==6.21.0
 Pillow
-miniaudio
+miniaudio>=1.71
