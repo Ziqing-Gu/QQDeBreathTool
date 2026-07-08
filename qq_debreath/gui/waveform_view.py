@@ -4,7 +4,7 @@ import importlib
 import math
 import sys
 
-from PyQt5.QtCore import Qt, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QRect, QRectF, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import QWidget
 
@@ -99,8 +99,18 @@ class WaveformWidget(QWidget):
         self.monitor_visible_classes = set(CLASSES)
         self.hover_region = -1
         self.hover_edge = None
+        self._wave_cache_key = None
+        self._wave_cache = None
         self.setMinimumHeight(260)
         self.setMouseTracking(True)
+
+    def invalidate_waveform_cache(self):
+        self._wave_cache_key = None
+        self._wave_cache = None
+
+    def resizeEvent(self, event):
+        self.invalidate_waveform_cache()
+        super().resizeEvent(event)
 
     def set_audio(self, audio, sr):
         ensure_numpy()
@@ -112,20 +122,33 @@ class WaveformWidget(QWidget):
         self.view_end = self.duration
         self.selected = -1
         self.playhead = 0.0
+        self.invalidate_waveform_cache()
         self.update()
         self.viewChanged.emit(self.view_start, self.view_end)
 
     def set_regions(self, regions):
         self.regions = regions
+        self.invalidate_waveform_cache()
         self.update()
 
     def set_new_class(self, cls):
         self.new_class = cls
 
     def set_playhead(self, t):
+        old_x = self.time_to_x(self.playhead) if self.view_start <= self.playhead <= self.view_end else None
         self.playhead = max(0.0, min(self.duration, float(t)))
         self.playheadChanged.emit(self.playhead)
-        self.update()
+        new_x = self.time_to_x(self.playhead) if self.view_start <= self.playhead <= self.view_end else None
+        if old_x is None and new_x is None:
+            return
+        update_rects = []
+        for x in {old_x, new_x}:
+            if x is None:
+                continue
+            left = max(0, int(x) - 4)
+            update_rects.append(QRect(left, 0, 9, self.height()))
+        for rect in update_rects:
+            self.update(rect)
 
     def set_display_gain(self, gain):
         self.display_gain = max(0.1, min(64.0, finite_float(gain, 1.0)))
@@ -187,6 +210,8 @@ class WaveformWidget(QWidget):
         changed = abs(start - self.view_start) > 1e-9 or abs(end - self.view_end) > 1e-9
         self.view_start = start
         self.view_end = end
+        if changed:
+            self.invalidate_waveform_cache()
         self.update()
         if emit and changed:
             self.viewChanged.emit(self.view_start, self.view_end)
@@ -207,6 +232,7 @@ class WaveformWidget(QWidget):
         self.breath_target_db = finite_float(breath_target_db, DEFAULT_BREATH_TARGET_DB)
         self.breath_gain_db = max(-30.0, min(30.0, finite_float(breath_gain_db, 0.0)))
         self.monitor_visible_classes = set(visible_classes or CLASSES)
+        self.invalidate_waveform_cache()
         self.update()
 
     def time_to_x(self, t):
@@ -232,6 +258,40 @@ class WaveformWidget(QWidget):
             if r.start <= t <= r.end:
                 return r.cls
         return "Vocal Only"
+
+    def waveform_cache_key(self, start_sample, end_sample, cols):
+        regions_key = tuple(
+            (round(float(r.start), 6), round(float(r.end), 6), str(r.cls))
+            for r in self.regions
+        )
+        return (
+            id(self.audio),
+            len(self.audio) if self.audio is not None else 0,
+            int(self.sr),
+            int(start_sample),
+            int(end_sample),
+            int(cols),
+            bool(self.normalize_breath_display),
+            round(float(self.breath_target_db), 4),
+            round(float(self.breath_gain_db), 4),
+            regions_key,
+        )
+
+    def cached_waveform_columns(self, start_sample, end_sample, cols):
+        key = self.waveform_cache_key(start_sample, end_sample, cols)
+        if self._wave_cache_key == key and self._wave_cache is not None:
+            return self._wave_cache
+
+        raw_samples = np.asarray(self.audio[start_sample:end_sample], dtype=np.float64).copy()
+        if raw_samples.size:
+            raw_samples = np.nan_to_num(raw_samples, nan=0.0, posinf=0.0, neginf=0.0)
+        samples = self.view_samples_for_display(start_sample, end_sample)
+        col_lo, col_hi, _ = self.waveform_column_bounds(samples, cols)
+        _, _, amp = self.waveform_column_bounds(raw_samples, cols)
+        classes = tuple(self.class_at_time(self.x_to_time(x)) for x in range(cols))
+        self._wave_cache_key = key
+        self._wave_cache = (col_lo, col_hi, amp, classes)
+        return self._wave_cache
 
     def view_samples_for_display(self, start_sample, end_sample):
         samples = np.asarray(self.audio[start_sample:end_sample], dtype=np.float64).copy()
@@ -260,8 +320,8 @@ class WaveformWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(12, 16, 22))
-        painter.fillRect(self.rect(), COLORS["Vocal Only"])
+        painter.fillRect(event.rect(), QColor(12, 16, 22))
+        painter.fillRect(event.rect(), COLORS["Vocal Only"])
         mid = self.height() // 2
         painter.setPen(QPen(QColor(48, 56, 68), 1))
         painter.drawLine(0, mid, self.width(), mid)
@@ -319,19 +379,16 @@ class WaveformWidget(QWidget):
             b = int(self.view_end * self.sr)
             a = max(0, min(len(self.audio) - 1, a))
             b = max(a + 1, min(len(self.audio), b))
-            raw_samples = np.asarray(self.audio[a:b], dtype=np.float64).copy()
-            if raw_samples.size:
-                raw_samples = np.nan_to_num(raw_samples, nan=0.0, posinf=0.0, neginf=0.0)
-            samples = self.view_samples_for_display(a, b)
             cols = max(1, self.width())
-            col_lo, col_hi, _ = self.waveform_column_bounds(samples, cols)
-            _, _, amp = self.waveform_column_bounds(raw_samples, cols)
+            col_lo, col_hi, amp, classes = self.cached_waveform_columns(a, b, cols)
             display_gain = finite_float(self.display_gain, 1.0)
-            for x in range(cols):
+            clip = event.rect()
+            x_start = max(0, min(cols - 1, clip.left()))
+            x_end = max(0, min(cols - 1, clip.right()))
+            for x in range(x_start, x_end + 1):
                 if x >= len(col_lo):
                     continue
-                t = self.x_to_time(x)
-                cls = self.class_at_time(t)
+                cls = classes[x] if x < len(classes) else "Vocal Only"
                 if cls in self.monitor_visible_classes:
                     painter.setPen(QPen(QColor(226, 232, 240), 1))
                 else:
@@ -444,6 +501,7 @@ class WaveformWidget(QWidget):
             dur = self.orig.end - self.orig.start
             r.start = max(0.0, min(self.duration - dur, self.orig.start + delta))
             r.end = r.start + dur
+        self.invalidate_waveform_cache()
         self.regionsChanged.emit()
         self.update()
 
@@ -457,6 +515,7 @@ class WaveformWidget(QWidget):
                     Region(a, b, self.new_class),
                     self.duration,
                 )
+                self.invalidate_waveform_cache()
                 self.regionsChanged.emit()
                 self.selectedChanged.emit(self.selected)
         self.drag_mode = None
@@ -489,8 +548,8 @@ class WaveformWidget(QWidget):
             if abs(primary_delta) < 1e-9:
                 event.accept()
                 return
-            direction = -1.0 if primary_delta > 0 else 1.0
-            step = span * 0.18 * direction
+            wheel_units = primary_delta / (120.0 if uses_physical_wheel else 240.0)
+            step = -span * 0.12 * wheel_units
             start = self.view_start + step
             self.set_view(start, start + span)
             event.accept()
@@ -500,7 +559,8 @@ class WaveformWidget(QWidget):
         if abs(primary_delta) < 1e-9:
             event.accept()
             return
-        factor = 0.8 if primary_delta > 0 else 1.25
+        wheel_units = primary_delta / (120.0 if uses_physical_wheel else 240.0)
+        factor = 0.86 ** wheel_units
         new_span = max(0.5, min(self.duration, span * factor))
         ratio = (center - self.view_start) / max(1e-9, span)
         view_start = max(0.0, min(self.duration - new_span, center - ratio * new_span))

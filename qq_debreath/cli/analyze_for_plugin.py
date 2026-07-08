@@ -61,6 +61,7 @@ def file_key(label: str) -> str:
     return {
         "Vocal Only": "vocal_only",
         "Breath": "breath",
+        "Noise": "noize",
         "Noize": "noize",
     }[label]
 

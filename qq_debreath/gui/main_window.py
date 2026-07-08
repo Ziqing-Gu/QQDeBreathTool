@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollBar,
+    QMenu,
     QVBoxLayout,
     QWidget,
 )
@@ -137,10 +138,49 @@ EDITABLE_CLASSES = _legacy().EDITABLE_CLASSES
 CLASSES = _legacy().CLASSES
 
 
+def normalize_class_name(cls):
+    return _legacy().normalize_class_name(cls)
+
+
+def class_display_name(cls):
+    return _legacy().class_display_name(cls)
+
+
+class CopyableLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.copy_status_callback = None
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_copy_menu)
+        self.setToolTip("双击或右键复制")
+
+    def copy_text(self):
+        text = self.text().strip()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        if self.copy_status_callback is not None:
+            self.copy_status_callback(f"已复制时码：{text}")
+
+    def show_copy_menu(self, pos):
+        menu = QMenu(self)
+        action = menu.addAction("复制时码")
+        if menu.exec_(self.mapToGlobal(pos)) == action:
+            self.copy_text()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.copy_text()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("去呼吸 / 呼吸与噪音分离工具 1.04")
+        self.setWindowTitle("去呼吸 / 呼吸与噪音分离工具 1.11")
         self.setStyleSheet(APP_STYLESHEET)
         icon = app_icon_path()
         if icon:
@@ -191,7 +231,8 @@ class MainWindow(QMainWindow):
         delete_btn = QPushButton("删除区块")
         type_label = QLabel("类型:")
         self.class_combo = QComboBox()
-        self.class_combo.addItems(EDITABLE_CLASSES)
+        for cls in EDITABLE_CLASSES:
+            self.class_combo.addItem(class_display_name(cls), cls)
         monitor_label = QLabel("Monitor:")
         monitor_label.setMinimumWidth(64)
         monitor_label.setToolTip("勾选要监听的分轨")
@@ -199,7 +240,7 @@ class MainWindow(QMainWindow):
         self.monitor_voice.setChecked(bool(self.settings.get("monitor_voice", True)))
         self.monitor_breath = QCheckBox("Breath")
         self.monitor_breath.setChecked(bool(self.settings.get("monitor_breath", True)))
-        self.monitor_noize = QCheckBox("Noize")
+        self.monitor_noize = QCheckBox("Noise")
         self.monitor_noize.setChecked(bool(self.settings.get("monitor_noize", True)))
         self.display_gain = DragValueLabel("显示", 1.0, 0.1, 64.0, "x", 1)
         self.monitor_gain_db = DragValueLabel(
@@ -241,10 +282,16 @@ class MainWindow(QMainWindow):
         )
         self.region_info = QLabel("未选中区块")
         self.region_info.setObjectName("hintLabel")
-        self.position_info = QLabel("00:00.000")
+        self.region_time_info = CopyableLabel("--:--.--- - --:--.---")
+        self.region_time_info.setObjectName("timeLabel")
+        self.region_time_info.setMinimumWidth(172)
+        self.region_time_info.setToolTip("选中区块的时码范围；双击或右键复制")
+        self.position_info = CopyableLabel("00:00.000")
         self.position_info.setObjectName("timeLabel")
         self.status = QLabel("拖入一个音频文件开始。")
         self.status.setObjectName("statusLabel")
+        self.region_time_info.copy_status_callback = self.status.setText
+        self.position_info.copy_status_callback = self.status.setText
         self.view_scroll = QScrollBar(Qt.Horizontal)
         self.view_scroll.setEnabled(False)
 
@@ -258,7 +305,7 @@ class MainWindow(QMainWindow):
         about_btn.clicked.connect(self.show_about)
         fit_btn.clicked.connect(self.fit_view)
         delete_btn.clicked.connect(self.delete_region)
-        self.class_combo.currentTextChanged.connect(self.class_combo_changed)
+        self.class_combo.currentIndexChanged.connect(self.class_combo_changed)
         self.display_gain.valueChanged.connect(self.wave.set_display_gain)
         self.enable_fade.stateChanged.connect(self.global_fade_changed)
         self.fade_in_ms.valueChanged.connect(self.global_fade_changed)
@@ -344,6 +391,9 @@ class MainWindow(QMainWindow):
         info.setSpacing(8)
         info.addWidget(self.region_info)
         info.addStretch(1)
+        info.addWidget(QLabel("区块:"))
+        info.addWidget(self.region_time_info)
+        info.addWidget(QLabel("当前位置:"))
         info.addWidget(self.position_info)
 
         layout = QVBoxLayout()
@@ -371,7 +421,7 @@ class MainWindow(QMainWindow):
             self.load_file(Path(urls[0].toLocalFile()))
 
     def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择音频文件", "", "Audio Files (*.wav *.aif *.aiff *.flac *.ogg);;All Files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择音频文件", "", "Audio Files (*.wav *.aif *.aiff *.flac *.ogg *.mp3);;All Files (*.*)")
         if path:
             self.load_file(Path(path))
 
@@ -487,7 +537,7 @@ class MainWindow(QMainWindow):
         self.save_session()
         breath_count = sum(1 for r in regions if r.cls == "Breath")
         if breath_count:
-            self.status.setText(f"分析完成：{breath_count} 个 Breath。Noize 已留给手动标记。")
+            self.status.setText(f"分析完成：{breath_count} 个 Breath。Noise 已留给手动标记。")
         else:
             self.status.setText("分析完成：没有检测到 Breath。可用 Shift 手动画区块。")
 
@@ -518,7 +568,7 @@ class MainWindow(QMainWindow):
 
     def restore_snapshot(self, snapshot):
         self.wave.regions = [
-            Region(float(r["start"]), float(r["end"]), r["cls"], finite_float(r.get("confidence", 1.0), 1.0))
+            Region(float(r["start"]), float(r["end"]), normalize_class_name(r["cls"]), finite_float(r.get("confidence", 1.0), 1.0))
             for r in snapshot.get("regions", [])
         ]
         self.wave.selected = int(snapshot.get("selected", -1))
@@ -582,10 +632,15 @@ class MainWindow(QMainWindow):
         self.updating_class_combo = True
         if idx >= 0 and idx < len(self.wave.regions):
             r = self.wave.regions[idx]
-            self.class_combo.setCurrentText(r.cls)
-            self.region_info.setText(f"已选：{r.cls} | {self.format_time(r.start)} - {self.format_time(r.end)}")
+            combo_index = self.class_combo.findData(r.cls)
+            if combo_index >= 0:
+                self.class_combo.setCurrentIndex(combo_index)
+            time_range = f"{self.format_time(r.start)} - {self.format_time(r.end)}"
+            self.region_info.setText(f"已选：{class_display_name(r.cls)} | {time_range}")
+            self.region_time_info.setText(time_range)
         else:
-            self.region_info.setText("Shift+拖动新增区块；右键区块切换 Breath/Noize；Shift+滚轮左右移动；数值拖动时 Shift 微调，Alt+左键恢复默认；B/N 改类型，Delete 删除。")
+            self.region_info.setText("Shift+拖动新增区块；右键区块切换 Breath/Noise；Shift+滚轮左右移动；数值拖动时 Shift 微调，Alt+左键恢复默认；B/N 改类型，Delete 删除。")
+            self.region_time_info.setText("--:--.--- - --:--.---")
         self.updating_class_combo = False
 
     def regions_changed(self):
@@ -597,6 +652,7 @@ class MainWindow(QMainWindow):
             self.wave.selected = self.find_matching_region_index(selected_region)
         if self.wave.selected >= len(self.wave.regions):
             self.wave.selected = -1
+        self.wave.invalidate_waveform_cache()
         self.selection_changed(self.wave.selected)
         self.wave.update()
         self.save_session()
@@ -615,7 +671,10 @@ class MainWindow(QMainWindow):
             return best
         return -1
 
-    def class_combo_changed(self, cls):
+    def class_combo_changed(self, *args):
+        cls = self.class_combo.currentData()
+        if cls is None:
+            cls = normalize_class_name(self.class_combo.currentText())
         self.wave.set_new_class(cls)
         if self.updating_class_combo:
             return
@@ -630,9 +689,14 @@ class MainWindow(QMainWindow):
         self.regions_changed()
 
     def set_selected_region_type(self, cls):
+        cls = normalize_class_name(cls)
         if cls not in EDITABLE_CLASSES:
             return
-        self.class_combo.setCurrentText(cls)
+        combo_index = self.class_combo.findData(cls)
+        if combo_index >= 0:
+            was_blocked = self.class_combo.blockSignals(True)
+            self.class_combo.setCurrentIndex(combo_index)
+            self.class_combo.blockSignals(was_blocked)
         self.wave.set_new_class(cls)
         idx = self.wave.selected
         if idx < 0 or idx >= len(self.wave.regions):
@@ -643,7 +707,7 @@ class MainWindow(QMainWindow):
         self.wave.regions[idx].cls = cls
         self.redo_stack.clear()
         self.regions_changed()
-        self.status.setText(f"已设为 {cls}。")
+        self.status.setText(f"已设为 {class_display_name(cls)}。")
 
     def toggle_region_type_from_wave(self, idx):
         if idx < 0 or idx >= len(self.wave.regions):
@@ -727,7 +791,7 @@ class MainWindow(QMainWindow):
                     Region(
                         float(item["start"]),
                         float(item["end"]),
-                        item["cls"],
+                        normalize_class_name(item["cls"]),
                         finite_float(item.get("confidence", 1.0), 1.0),
                     )
                 )
@@ -1002,7 +1066,7 @@ class MainWindow(QMainWindow):
                 self.set_selected_region_type("Breath")
                 return True
             if event.key() == Qt.Key_N and not event.isAutoRepeat():
-                self.set_selected_region_type("Noize")
+                self.set_selected_region_type("Noise")
                 return True
         return super().eventFilter(obj, event)
 
@@ -1027,7 +1091,7 @@ class MainWindow(QMainWindow):
             event.accept()
             return
         if event.key() == Qt.Key_N and not event.isAutoRepeat():
-            self.set_selected_region_type("Noize")
+            self.set_selected_region_type("Noise")
             event.accept()
             return
         super().keyPressEvent(event)

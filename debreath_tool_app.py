@@ -120,11 +120,27 @@ DEFAULT_AUTO_BREATH_MIN_SECONDS = 0.12
 AUTO_BREATH_SHORT_REVIEW_SECONDS = 0.16
 CLASSES = ["Vocal Only", "Breath", "Noize"]
 EDITABLE_CLASSES = ["Breath", "Noize"]
+CLASS_ALIASES = {
+    "Noise": "Noize",
+}
+CLASS_DISPLAY_NAMES = {
+    "Noize": "Noise",
+}
 COLORS = {
     "Vocal Only": QColor(22, 101, 52, 34),
     "Breath": QColor(56, 189, 248, 118),
     "Noize": QColor(245, 158, 11, 122),
 }
+
+
+def normalize_class_name(cls):
+    value = str(cls or "")
+    return CLASS_ALIASES.get(value, value)
+
+
+def class_display_name(cls):
+    value = normalize_class_name(cls)
+    return CLASS_DISPLAY_NAMES.get(value, value)
 
 
 def ensure_numpy():
@@ -1194,8 +1210,9 @@ def normalize_regions(regions, duration):
     for r in regions:
         a = max(0.0, min(duration, float(r.start)))
         b = max(0.0, min(duration, float(r.end)))
-        if b - a >= 0.005 and r.cls in CLASSES:
-            clean.append(Region(a, b, r.cls, finite_float(getattr(r, "confidence", 1.0), 1.0)))
+        cls = normalize_class_name(r.cls)
+        if b - a >= 0.005 and cls in CLASSES:
+            clean.append(Region(a, b, cls, finite_float(getattr(r, "confidence", 1.0), 1.0)))
     clean.sort(key=lambda r: (r.start, -priority[r.cls]))
     out = []
     for r in clean:
@@ -1220,10 +1237,11 @@ def normalize_regions(regions, duration):
 def insert_region_with_boundaries(regions, new_region, duration, min_duration=0.005):
     start = max(0.0, min(duration, float(new_region.start)))
     end = max(0.0, min(duration, float(new_region.end)))
-    if end - start < min_duration or new_region.cls not in CLASSES:
+    new_cls = normalize_class_name(new_region.cls)
+    if end - start < min_duration or new_cls not in CLASSES:
         return normalize_regions(regions, duration), -1
 
-    inserted = Region(start, end, new_region.cls, finite_float(getattr(new_region, "confidence", 1.0), 1.0))
+    inserted = Region(start, end, new_cls, finite_float(getattr(new_region, "confidence", 1.0), 1.0))
     out = []
     for r in regions:
         if r.end <= start or r.start >= end:
@@ -1277,7 +1295,7 @@ def apply_breath_time_overrides(regions, source_path, duration):
 
 
 def region_public_dict(region):
-    return {"start": region.start, "end": region.end, "cls": region.cls}
+    return {"start": region.start, "end": region.end, "cls": class_display_name(region.cls)}
 
 
 def normalize_breath_blocks(data, audio, regions, sr, target_db=-6.0):
@@ -1409,9 +1427,9 @@ def export_stems(
             data = normalize_breath_blocks(data, audio, regions, sr, breath_target_db)
         if cls == "Breath":
             data = apply_breath_gain(data, breath_gain_db)
-        out = folder / f"{stem}_{cls}.wav"
+        out = folder / f"{stem}_{class_display_name(cls)}.wav"
         writer.write(str(out), data, sr, format="WAV", subtype=output_subtype)
-        out_paths[cls] = str(out)
+        out_paths[class_display_name(cls)] = str(out)
     return out_paths
 
 
