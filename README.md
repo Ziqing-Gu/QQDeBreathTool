@@ -1,5 +1,6 @@
 # QQDeBreathTool
-![Uploading image.png…]()
+<img width="1182" height="592" alt="image" src="https://github.com/user-attachments/assets/74673a30-7c39-4179-95f8-e00ee704d3d6" />
+
 
 QQDeBreathTool is a waveform-editing tool for separating and editing vocal
 Breath / Noise regions. It loads an audio file, analyzes Breath regions,
