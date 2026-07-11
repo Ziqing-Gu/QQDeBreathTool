@@ -1,0 +1,140 @@
+name: Build macOS standalone apps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Apple Silicon
+            runner: macos-15
+            expected_arch: arm64
+            zip_name: QQDeBreathTool-macOS-Apple-Silicon
+
+          - label: Intel
+            runner: macos-15-intel
+            expected_arch: x86_64
+            zip_name: QQDeBreathTool-macOS-Intel
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.expected_arch }}
+          cache: pip
+          cache-dependency-path: requirements-qqdebreath.txt
+
+      - name: Show build environment
+        run: |
+          sw_vers
+          uname -m
+          python --version
+          python -c "import platform; print('Python architecture:', platform.machine())"
+
+      - name: Check required project files
+        run: |
+          test -f debreath_tool_app.py
+          test -f breath_frame_model.joblib
+          test -f debreath_icon.ico
+          test -f requirements-qqdebreath.txt
+          test -f QQDeBreathTool-macos.spec
+
+          echo "Required files found."
+          ls -lh breath_frame_model.joblib
+          ls -lh debreath_icon.ico
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-qqdebreath.txt
+          python -m pip check
+
+      - name: Verify important Python packages
+        run: |
+          python - <<'PY'
+          import platform
+          import numpy
+          import scipy
+          import soundfile
+          import sklearn
+          import joblib
+          import miniaudio
+          from PIL import Image
+          from PyQt5.QtWidgets import QApplication
+
+          print("Architecture:", platform.machine())
+          print("NumPy:", numpy.__version__)
+          print("SciPy:", scipy.__version__)
+          print("scikit-learn:", sklearn.__version__)
+          print("All important packages imported successfully.")
+          PY
+
+      - name: Build QQDeBreathTool app
+        run: |
+          rm -rf build dist
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            QQDeBreathTool-macos.spec
+
+      - name: Verify app bundle and architecture
+        run: |
+          APP_PATH="dist/QQDeBreathTool.app"
+          BIN_PATH="$APP_PATH/Contents/MacOS/QQDeBreathTool"
+
+          test -d "$APP_PATH"
+          test -f "$BIN_PATH"
+
+          echo "Generated application:"
+          find "$APP_PATH" -maxdepth 3 -type f | head -50
+
+          echo "Executable architecture:"
+          file "$BIN_PATH"
+
+          file "$BIN_PATH" | grep -q "${{ matrix.expected_arch }}"
+
+          echo "Checking code signature:"
+          codesign --verify \
+            --deep \
+            --strict \
+            --verbose=2 \
+            "$APP_PATH"
+
+      - name: Package app as macOS-compatible ZIP
+        run: |
+          ZIP_NAME="${{ matrix.zip_name }}.zip"
+
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            "dist/QQDeBreathTool.app" \
+            "$ZIP_NAME"
+
+          ls -lh "$ZIP_NAME"
+
+      - name: Upload finished Mac app
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.zip_name }}
+          path: ${{ matrix.zip_name }}.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
