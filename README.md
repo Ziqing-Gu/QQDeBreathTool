@@ -10,6 +10,11 @@ WAV stems.
 
 > Non-commercial source release. QQ group: 692973169.
 
+## 下载 / Download
+
+- 最新正式版 / Latest release: [QQDeBreathTool 1.11](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.11)
+- 全部历史版本 / All releases: [GitHub Releases](https://github.com/Ziqing-Gu/QQDeBreathTool/releases)
+
 ## Version
 
 Current version: `1.11`
