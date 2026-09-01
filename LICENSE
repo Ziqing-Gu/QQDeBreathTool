@@ -1,25 +1,179 @@
-QQDeBreathTool Non-Commercial Source License
+QING AUDIO NON-COMMERCIAL SOURCE-SHARE LICENSE 1.0
 
-Copyright (c) 2026 Gu Ziqing.
+SPDX-License-Identifier: LicenseRef-Qing-Audio-NC-Source-Share-1.0
 
-This repository is made publicly available for learning, review, personal use,
-research, and non-commercial audio production workflows.
+Copyright (c) 2026 Qing Audio and the identified copyright holders.
+All rights are reserved except those expressly granted by this License.
 
-You may:
-- read, study, and modify the source code;
-- build local copies for personal or internal non-commercial use;
-- share non-commercial modifications with attribution.
+IMPORTANT: This is a source-available, non-commercial software license.
+It is not an Open Source Initiative approved open-source license.
 
-You may not:
-- sell this software or derivative versions;
-- include this software in a commercial product or paid service;
-- remove the in-app non-commercial notice;
-- use the QQDeBreathTool name, icon, or author attribution to imply endorsement
-  of a modified build.
+1. Acceptance
 
-Commercial licensing or redistribution requires explicit written permission
-from the copyright holder.
+By using, copying, modifying, or distributing the Software, You accept this
+License. If You do not accept it, You receive no permission under it.
 
-This software is provided "as is", without warranty of any kind. The authors
-are not liable for any damages, data loss, audio loss, or production issues
-arising from use of this software.
+2. Definitions
+
+"Software" means the project-authored source code, object code, binaries,
+documentation, build files, assets, and other materials supplied with this
+License, excluding Third-Party Components.
+
+"You" means the individual or legal entity exercising rights under this
+License.
+
+"Commercial Use" means any use that is intended for, supports, or results in
+commercial advantage, monetary compensation, revenue, monetization, or benefit
+to a for-profit activity. Commercial Use includes, without limitation:
+
+* selling, licensing, renting, or charging for the Software or access to it;
+* using the Software in a paid product, paid service, subscription, hosted
+  service, consulting engagement, support offering, or commercial production;
+* integrating the Software into a product or service that is sold, licensed,
+  monetized by advertising, sponsorship, affiliate income, or other revenue;
+* using the Software internally by or on behalf of a for-profit organization;
+* distributing the Software to promote, market, or support a commercial
+  product, service, or business activity.
+
+Passive hosting, indexing, or transmission by a general-purpose source-code
+repository or network provider on behalf of a permitted non-commercial user is
+not Commercial Use solely because the provider is a commercial entity.
+
+"Non-Commercial Use" means use solely for personal study, education, academic
+or public-interest research, evaluation, hobby activity, charity, or another
+purpose without anticipated commercial application or commercial benefit.
+
+"Distribute" means to publish, provide, transfer, sublicense, share, make
+available, or convey any copy of the Software or a Modified Work, whether as
+source code, object code, binary, plug-in, installer, archive, service image,
+or any other form.
+
+"Modified Work" means any work based on, incorporating, translating, adapting,
+or modifying any part of the Software.
+
+"Corresponding Source" means the complete preferred form for making changes,
+including all project-authored source files, modifications, interface files,
+build and installation scripts, configuration files, and other materials
+reasonably necessary to build, install, and run the distributed version. It
+does not include generally available system components or Third-Party
+Components obtainable separately under their own licenses.
+
+"Required Notice" means each plain-text notice supplied with the Software that
+identifies the project, copyright holder, original author, or original source.
+
+"Third-Party Components" means materials identified as belonging to another
+copyright holder or supplied under another license.
+
+3. Non-Commercial License Grant
+
+Subject to full compliance with this License, the copyright holders grant You
+a worldwide, royalty-free, non-exclusive, non-transferable license to use,
+study, copy, modify, and Distribute the Software and Modified Works solely for
+Non-Commercial Use.
+
+No Commercial Use is permitted unless the relevant copyright holders provide a
+separate written commercial license. No right is granted by implication.
+
+4. Distribution and Source-Sharing Conditions
+
+Whenever You Distribute the Software or a Modified Work, You must:
+
+a. include this complete License and every Required Notice;
+
+b. preserve all copyright, authorship, attribution, license, and warranty
+   notices;
+
+c. state prominently that the work is based on the applicable Qing Audio
+   project, identify the original project and author, and provide the original
+   source repository URL when one was supplied;
+
+d. state prominently that You changed the Software, describe the material
+   changes, identify the modifier, and give the modification date;
+
+e. provide the complete Corresponding Source at the same time, without charge,
+   through the same distribution or a stable, publicly accessible URL;
+
+f. keep the Corresponding Source available for as long as the distributed form
+   remains available and for at least three years after the last distribution;
+
+g. license the entire Modified Work under this same License, with no additional
+   restriction that conflicts with it;
+
+h. ensure that every recipient can exercise the same Non-Commercial Use,
+   modification, and distribution rights under this License.
+
+Binary-only or source-incomplete distribution is prohibited.
+
+5. Attribution Format
+
+Attribution must be reasonably prominent in the README, About page, release
+notes, documentation, or another location ordinarily visible to recipients. It
+must use this form, adapted only to fill in the brackets:
+
+    Based on [Project Name] by Qing Audio / Ziqing Gu.
+    Original source: [Original Repository URL]
+    Modified by: [Modifier Name]
+    Modification date and summary: [Date and Summary]
+
+You may not remove Required Notices or imply endorsement by the original author.
+
+6. Third-Party Components
+
+This License does not replace or alter any license for a Third-Party Component.
+You must comply with all applicable third-party licenses. If a Third-Party
+Component's terms conflict with this License, You receive only the rights that
+can lawfully coexist, and You must not Distribute an unlawful combination.
+
+7. Trademarks and Branding
+
+No trademark, logo, product-name, trade-dress, or endorsement right is granted.
+Modified Works must not create confusion about their origin or official status.
+The copyright holders may require a Modified Work to use a different product
+name, identifier, or branding.
+
+8. Patent License
+
+Each copyright holder grants You a patent license covering patent claims that
+the holder can license and that are necessarily infringed by the permitted
+Non-Commercial Use of that holder's contribution. This patent license ends
+immediately if You or Your organization assert a patent claim alleging that the
+Software or a contribution infringes a patent.
+
+9. Termination and Cure
+
+Any breach automatically terminates Your rights under this License. For a first
+breach, Your rights may be reinstated if You fully cure the breach within 30
+days after receiving written notice. Repeated, willful, or uncured breaches are
+not automatically reinstated. Termination does not limit other legal remedies.
+
+10. Commercial Licensing
+
+Commercial permission may be available under a separate written agreement from
+the relevant copyright holders. A commercial license does not change the terms
+applicable to copies received only under this License.
+
+11. Disclaimer of Warranty
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE SOFTWARE IS PROVIDED "AS IS" AND
+WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+12. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, NO COPYRIGHT HOLDER OR CONTRIBUTOR WILL
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+CONSEQUENTIAL, OR OTHER DAMAGES ARISING FROM THE SOFTWARE OR THIS LICENSE,
+REGARDLESS OF THE LEGAL THEORY AND EVEN IF ADVISED OF THE POSSIBILITY OF DAMAGE.
+
+13. Severability
+
+If any provision is held unenforceable, it will be limited to the minimum
+extent necessary, and the remaining provisions will continue in effect.
+
+14. Previously Distributed Copies
+
+This License applies to a copy only when the relevant copyright holders supply
+that copy under this License. Rights already granted for previously distributed
+copies under earlier license terms are not retroactively revoked.
+
+END OF LICENSE
