@@ -1,0 +1,30 @@
+# QQDeBreathTool standalone 1.12 - 2026-10-27
+
+Optimize detection speed without changing the model, thresholds or region rules. Square sample data once for frame RMS, compare adjacent signs once for ZCR, and process spectra in bounded batches. Only exactly-zero frames reuse the original zero-frame statistics; quiet nonzero audio receives full analysis. A Windows x64 helper temporarily enables thread-local SSE FTZ/DAZ around sosfiltfilt and restores the exact prior floating-point state on exit, including exceptions. This avoids denormal filter-tail slowdown without changing global process state.
+
+Fix the progress callback's reentrant modal-dialog access: update the label before setValue, because setValue can process completion and clear the window's dialog reference. Undo/Redo remains intact.
+
+Validation: 20 synthetic frame/rate/silence cases, exact FP-state restoration, eight original WAV comparisons, source GUI/real AnalyzeThread completion and Undo/Redo offscreen, and frozen EXE CLI analysis. All eight inputs remain byte-identical; complete region dictionaries match 1.11. Model SHA-256 d655af2bfb260866de74319d179fda0b007e6539711c572967bc0fc709e42afe is unchanged. No real interactive desktop acceptance is claimed.
+
+| Sample | 1.11 seconds | 1.12 seconds | Regions |
+|---|---:|---:|---:|
+| Everyday/Vocal L.wav | 19.740 | 11.561 | 72 |
+| 今夜星辰/今夜星辰-Vocal女.wav | 25.162 | 5.498 | 12 |
+| 今夜星辰/今夜星辰-Vocal男1.wav | 7.356 | 6.415 | 28 |
+| 呼吸有害/呼吸有害 人声.wav | 8.068 | 6.579 | 54 |
+| 大脑将我扼杀/人声1.wav | 22.284 | 9.077 | 60 |
+| 小白兔/MixdownDN.wav | 1.366 | 1.172 | 3 |
+| 阿那亚/Vocal1.wav | 43.211 | 9.238 | 12 |
+| 阿那亚/Vocal2.wav | 36.498 | 8.976 | 19 |
+
+Prior local checkpoint: Windows standalone 1.12 was delivered and validated before public release was requested. The plug-in line is separate.
+
+Build from the current sources; no private diagnostic transformation scripts or source recordings are distributed.
+
+## 2026-10-27 — User-designated 1.12 Stable; standalone Plan B/C/D
+
+The user explicitly selected standalone 1.12 as Stable and authorized one new Plan B, followed by C/D. Reuse the completed Windows build, tests and installation. Publish the complete corresponding source and build the missing native Apple Silicon/Intel apps. The earlier no-publication/no-Stable status above describes the previous task checkpoint and is superseded by this request. Existing plugin releases are separate and complete. No product behavior changes are made for Stable designation.
+
+## 2026-10-27 — Plan B complete and frozen
+
+Standalone 1.12 Stable: 62 source files / 2121216 bytes; every copied file hash matched. The backup is frozen. Later stages inherit this record without opening or refreshing the snapshot.

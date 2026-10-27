@@ -552,15 +552,21 @@ def frame_rms(x: np.ndarray, frame: int, hop: int):
     else:
         extra = int(np.ceil((len(x) - frame) / hop) * hop + frame - len(x))
         padded = np.pad(x, (0, max(0, extra)))
-    frames = np.lib.stride_tricks.sliding_window_view(padded, frame)[::hop]
-    return np.sqrt(np.mean(frames * frames, axis=1) + 1e-20)
+    # Square each sample once; overlapping frames share the same immutable values.
+    squared = np.square(padded)
+    frames = np.lib.stride_tricks.sliding_window_view(squared, frame)[::hop]
+    return np.sqrt(np.mean(frames, axis=1) + 1e-20)
 
 
 def band_rms(mono, sr, lo, hi, frame, hop):
     sig = ensure_scipy_signal()
     nyq = sr / 2
     sos = sig.butter(2, [lo / nyq, min(hi / nyq, 0.98)], btype="band", output="sos")
-    y = sig.sosfiltfilt(sos, mono)
+    from qq_debreath.core.fp_control import suppress_denormals
+    # Silence can leave recursive filters in subnormal arithmetic for seconds.
+    # Restore the calling thread's exact floating-point control state afterwards.
+    with suppress_denormals():
+        y = sig.sosfiltfilt(sos, mono)
     return frame_rms(y, frame, hop)
 
 
@@ -580,8 +586,10 @@ def zcr_frames(mono, frame, hop):
     else:
         extra = int(np.ceil((len(mono) - frame) / hop) * hop + frame - len(mono))
         padded = np.pad(mono, (0, max(0, extra)))
-    frames = np.lib.stride_tricks.sliding_window_view(padded, frame)[::hop]
-    return np.mean(np.signbit(frames[:, 1:]) != np.signbit(frames[:, :-1]), axis=1)
+    signs = np.signbit(padded)
+    changes = signs[1:] != signs[:-1]
+    frames = np.lib.stride_tricks.sliding_window_view(changes, frame - 1)[::hop]
+    return np.mean(frames, axis=1)
 
 
 def spectral_flatness_frames(mono, frame, hop):
@@ -673,23 +681,37 @@ def spectral_detail_frames(mono, sr, frame, hop):
         padded = np.pad(mono, (0, max(0, extra)))
     frames = np.lib.stride_tricks.sliding_window_view(padded, frame)[::hop]
     win = np.hanning(frame)
-    spec = np.abs(np.fft.rfft(frames * win[None, :], axis=1)) + 1e-12
-    freqs = np.fft.rfftfreq(frame, 1.0 / sr)
-    total = np.sum(spec, axis=1) + 1e-12
-    flat = np.exp(np.mean(np.log(spec), axis=1)) / (np.mean(spec, axis=1) + 1e-12)
-    centroid = np.sum(spec * freqs[None, :], axis=1) / total
-    crest_db = 20.0 * np.log10((np.max(spec, axis=1) + 1e-12) / (np.mean(spec, axis=1) + 1e-12))
+    def measure(selected):
+        spec = np.abs(np.fft.rfft(selected * win[None, :], axis=1)) + 1e-12
+        freqs = np.fft.rfftfreq(frame, 1.0 / sr)
+        total = np.sum(spec, axis=1) + 1e-12
+        flat = np.exp(np.mean(np.log(spec), axis=1)) / (np.mean(spec, axis=1) + 1e-12)
+        centroid = np.sum(spec * freqs[None, :], axis=1) / total
+        crest_db = 20.0 * np.log10((np.max(spec, axis=1) + 1e-12) / (np.mean(spec, axis=1) + 1e-12))
 
-    def band_flat(lo, hi):
-        mask = (freqs >= lo) & (freqs <= min(hi, sr / 2.0))
-        if not np.any(mask):
-            return flat
-        band = spec[:, mask]
-        return np.exp(np.mean(np.log(band), axis=1)) / (np.mean(band, axis=1) + 1e-12)
+        def band_flat(lo, hi):
+            mask = (freqs >= lo) & (freqs <= min(hi, sr / 2.0))
+            if not np.any(mask):
+                return flat
+            band = spec[:, mask]
+            return np.exp(np.mean(np.log(band), axis=1)) / (np.mean(band, axis=1) + 1e-12)
 
-    low_flat = band_flat(80.0, 2500.0)
-    air_flat = band_flat(2500.0, 11000.0)
-    return flat, np.clip(centroid / max(1.0, sr / 2.0), 0.0, 1.0), crest_db, low_flat, air_flat
+        low_flat = band_flat(80.0, 2500.0)
+        air_flat = band_flat(2500.0, 11000.0)
+        return flat, np.clip(centroid / max(1.0, sr / 2.0), 0.0, 1.0), crest_db, low_flat, air_flat
+
+    # Keep original positions/global statistics, but do no FFT work on pure-zero
+    # frames. Nonzero quiet breaths/noise always use the full original calculation.
+    zero = measure(np.zeros((1, frame), dtype=np.float64))
+    values = [np.full(len(frames), field[0], dtype=np.float64) for field in zero]
+    for offset in range(0, len(frames), 512):
+        batch = frames[offset:offset + 512]
+        active = np.flatnonzero(np.any(batch != 0.0, axis=1))
+        if active.size:
+            calculated = measure(batch[active])
+            for target, field in zip(values, calculated):
+                target[offset + active] = field
+    return tuple(values)
 
 
 def features_for_audio(audio, sr):
@@ -1455,6 +1477,8 @@ def main():
         raise SystemExit(plugin_cli_main(sys.argv[2:]))
 
     parser = argparse.ArgumentParser()
+    from qq_debreath import __version__
+    parser.add_argument("--version", action="version", version="QQDeBreathTool " + __version__)
     parser.add_argument("--analyze-only", action="store_true")
     parser.add_argument("--input", type=Path)
     parser.add_argument("--model", type=Path)

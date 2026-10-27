@@ -1,0 +1,53 @@
+name: Release standalone 1.12 Mac apps
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mac:
+    name: macOS ${{ matrix.arch }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            label: Apple-Silicon
+          - runner: macos-15-intel
+            arch: x86_64
+            label: Intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: requirements-qqdebreath.txt
+      - name: Install dependencies
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          python -m pip install -r requirements-qqdebreath.txt
+          python -m pip check
+          mkdir -p release
+          python -m pip freeze > release/dependencies.txt
+      - name: Build app
+        run: python -m PyInstaller --noconfirm QQDeBreathTool-macos.spec
+      - name: Verify architecture, version, model, signature and frozen CLI
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: python tests/verify_mac_release.py
+      - name: Package app preserving symlinks and permissions
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/QQDeBreathTool.app release/QQDeBreathTool-macOS-${{ matrix.label }}-1.12.zip
+          shasum -a 256 release/*.zip > release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: QQDeBreathTool-1.12-macOS-${{ matrix.arch }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30

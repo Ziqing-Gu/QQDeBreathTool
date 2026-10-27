@@ -75,4 +75,6 @@ app = BUNDLE(
     name='QQDeBreathTool.app',
     icon='debreath_icon.ico',
     bundle_identifier='com.ziqinggu.qqdebreathtool',
+    version='1.12',
+    info_plist={'CFBundleShortVersionString': '1.12', 'CFBundleVersion': '1.12'},
 )

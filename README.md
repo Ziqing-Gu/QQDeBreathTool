@@ -4,9 +4,9 @@
 
 ### 本项目源码公开，但不属于 OSI 认可的开源软件
 
-> **禁止任何商业使用。** 仅允许个人、学习、教育、研究、评估、爱好及其他非商业用途。发布原版或修改版时，必须同时免费公开完整对应源代码，保留作者、版权和许可证声明，醒目标明原项目名称、作者、来源链接、修改者、修改日期及修改内容，并使整个修改版继续采用同一许可证。完整条款见 [LICENSE](LICENSE)。
+> **禁止任何商业使用。** 仅允许个人、学习、教育、研究、评估、爱好及其他非商业用途。发布原版、二进制版或修改版时，必须同时免费公开完整对应源代码，保留作者、版权和许可证声明，醒目标明原项目名称、作者、来源链接、修改者、修改日期及修改内容，并使整个修改版继续采用同一许可证。完整条款见 [LICENSE](LICENSE)。
 >
-> **NO COMMERCIAL USE.** Use is permitted only for personal, educational, research, evaluation, hobby, charitable, and other non-commercial purposes. Any distributed original or modified version must provide the complete corresponding source without charge, preserve authorship, copyright, and license notices, prominently identify the original project, author, source URL, modifier, date, and changes, and license the entire modified work under the same terms. See [LICENSE](LICENSE).
+> **NO COMMERCIAL USE.** Use is permitted only for personal, educational, research, evaluation, hobby, charitable, and other non-commercial purposes. Any distributed original, binary, or modified version must provide the complete corresponding source without charge, preserve authorship, copyright, and license notices, prominently identify the original project, author, source URL, modifier, date, and changes, and license the entire modified work under the same terms. See [LICENSE](LICENSE).
 >
 > 许可证政策变更与后续 AI 维护说明见 [LICENSE_POLICY_CHANGE.md](LICENSE_POLICY_CHANGE.md)。 / See [LICENSE_POLICY_CHANGE.md](LICENSE_POLICY_CHANGE.md) for the policy record and future AI maintenance instructions.
 
@@ -30,7 +30,19 @@ WAV stems.
 
 ## Version
 
-Current version: `1.11`
+Current Stable version: **1.12**, designated by the user on 2026-10-27.
+
+## 1.12 Stable — 2026-10-27 — 分析加速 / Faster analysis
+
+- 中文：减少 RMS、过零率和频谱分析的重复运算；只对严格为零的窗口复用静音统计。Windows x64 在滤波期间使用线程局部浮点控制，避免极小残余信号拖慢分析，并在退出时恢复原状态。修复分析进度窗口完成回调重入的问题。用户指定为 Stable。
+- English: Avoid repeated work in RMS, zero-crossing and spectral analysis; reuse silence statistics only for exactly-zero windows. On Windows x64, temporary thread-local floating-point control avoids slow subnormal filter tails and restores the prior state on exit. Fix reentrant analysis-progress completion. User-designated Stable.
+- 模型、阈值、区域规则和编辑操作不变。八份原始音频的完整检测区域与 1.11 相同；20 项合成数据检查、浮点状态恢复、离屏 GUI 分析与 Undo/Redo、Windows EXE CLI 检查通过。
+- The model, thresholds, region rules and editing behavior are unchanged. Complete region results match 1.11 on eight original recordings. Twenty synthetic cases, FP-state restoration, offscreen GUI analysis/Undo/Redo and the Windows frozen CLI passed.
+- Windows 实测例子：43.211→9.238 秒、36.498→8.976 秒、25.162→5.498 秒。不是所有素材都会同幅提速。Mac 使用跨平台运算优化，不包含 Windows 浮点辅助库；不把 Windows 测速结果当作 Mac 测速。
+- Windows timing examples: 43.211→9.238 s, 36.498→8.976 s, 25.162→5.498 s. Gains depend on the material. Mac uses the portable analysis improvements without the Windows FP helper; these timings are not Mac benchmarks.
+- 升级与限制：退出应用后替换整个程序目录/APP；保留用户设置。Mac 使用临时签名，未经 Developer ID 公证。构建与自动检查不代表真实桌面试听验收。无试用到期或功能限制。
+- Upgrade and limitations: quit the app and replace the complete application folder/bundle, preserving user settings. Mac apps are ad-hoc signed, not Developer ID notarized. Builds and automated checks do not claim real desktop listening acceptance. No trial expiry or feature limits.
+
 
 Version 1.11 keeps the 1.10 detector/model unchanged and focuses on UI
 smoothness: cached waveform drawing, lighter playhead repainting, and finer
@@ -117,7 +129,8 @@ comparable competing plugins and software.
 - Breath Adjust / Breath Gain for changing Breath stem level.
 - Copyable current playhead timecode and selected region time range.
 - Restores the last opened audio file and edited regions on launch.
-- Windows PyInstaller build spec included.
+- Windows x64 and native macOS Apple Silicon / Intel standalone apps.
+- Qing Audio / Gu Ziqing; GUI and CLI version 1.12.
 
 ## Repository Contents
 
@@ -187,23 +200,11 @@ The main executable is:
 dist\QQDeBreathTool\QQDeBreathTool.exe
 ```
 
-## macOS Notes
+## macOS builds / Mac 构建
 
-The source includes macOS-friendly settings and font handling, but the included
-`.spec` is Windows-oriented. On macOS, use a macOS PyInstaller command or spec
-and use `:` as the `--add-data` separator.
+Use Python 3.10 and `QQDeBreathTool-macos.spec` on a native Apple Silicon or Intel runner. The `release-standalone-112.yml` workflow builds both app architectures and checks versions, executable architectures, bundled model, signature and frozen CLI analysis. The Windows build is reused from the verified local 1.12 delivery. Existing contributor workflows remain unchanged; release commits skip push CI and the Mac release workflow is dispatched explicitly.
 
-Example:
-
-```bash
-python3 -m PyInstaller --noconfirm --windowed --name QQDeBreathTool \
-  --add-data "breath_frame_model.joblib:." \
-  --add-data "debreath_icon.ico:." \
-  -i debreath_icon.ico \
-  debreath_tool_app.py
-```
-
-The macOS builder may need PortAudio available for `sounddevice`.
+See [BUILD](BUILD.md) and the bilingual guides under [docs](docs). The Windows-only FP helper is intentionally absent on Mac. Performance gains on Mac have not been benchmarked on the private recordings. macOS 11 or newer is the intended minimum; platform and dependency requirements are checked during packaging. Developer ID signing/notarization and interactive Mac listening acceptance are not claimed.
 
 ## 许可证 / License
 

@@ -1,0 +1,18 @@
+QQDeBreathTool 独立版 1.12 Stable — 安装与使用
+Qing Audio / 顾子青 | 2026-10-27
+
+这是独立应用，不是 VST3 / AU / ARA 插件，无需在宿主中扫描。
+Windows 10/11 x64：QQDeBreathTool-Windows-x64-1.12.zip。
+macOS：Apple Silicon（M 系列芯片）选择 Apple-Silicon；Intel Mac 选择 Intel。以 Release 中的构建验证记录为准。
+
+Windows：退出 QQDeBreathTool，解压 Windows ZIP，将整个 QQDeBreathTool 文件夹放到需要的位置；运行 QQDeBreathTool.exe。必须保留 _internal，不能只复制 EXE。升级前保留旧程序副本，再用新文件夹替换；不要把新旧运行库混在一起。无需安装 Python。
+Mac：退出旧应用，用系统归档实用工具解压对应 ZIP，把 QQDeBreathTool.app 拖入 Applications（应用程序），替换旧 APP 后启动。包内符号链接和执行权限必须保留，不要经由 Windows 解压后再复制。
+Mac 成品为 ad-hoc 签名，未做 Apple Developer ID 公证。如果系统阻止打开，请在确认来自本项目正式 Release 后，尝试右键“打开”或系统设置的隐私与安全性入口。若确为隔离属性阻止，可在终端输入 xattr -dr com.apple.quarantine 加空格，然后拖入该 APP，再回车；只针对这个可信 APP。
+
+使用：打开/拖入人声音频，点击 Analyze；试听 Voice / Breath / Noise，手动调整区域，再导出 Vocal Only、Breath、Noise。编辑撤销 Ctrl+Z，重做 Ctrl+Shift+Z（Mac 可使用界面按钮）。升级不会更改原始音频。1.12 保留 1.11 模型和检测规则，优化分析速度并修复进度窗口完成回调。
+如果缺少 DLL、模型或运行库，请重新完整解压；不要单独运行 ZIP 内的 EXE。没有声音时检查所选设备和监听类型。自动检测后请先试听，再决定导出。
+
+许可证：Qing Audio 非商业源码共享许可证 1.0，禁止商业使用。分发原版、二进制版或修改版必须免费提供完整对应源码、保留作者及许可证、标明来源和修改，修改版沿用同一许可证。第三方库保留各自许可证。
+完整源码：QQDeBreathTool-1.12-Complete-Source.zip。GitHub 自动 Source code (zip)/(tar.gz) 也是源码，均不是可运行程序。
+源码和许可：https://github.com/Ziqing-Gu/QQDeBreathTool/tree/v1.12
+正式下载：https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12

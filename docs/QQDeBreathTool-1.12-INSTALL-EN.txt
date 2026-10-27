@@ -1,0 +1,18 @@
+QQDeBreathTool standalone 1.12 Stable — Installation and use
+Qing Audio / Gu Ziqing | 2026-10-27
+
+This is a standalone app, not a VST3, AU or ARA plug-in. No DAW scan is needed.
+Windows 10/11 x64: QQDeBreathTool-Windows-x64-1.12.zip.
+Mac: choose Apple-Silicon for M-series chips, or Intel for Intel Macs. Consult this release's build-validation record for platform details.
+
+Windows: quit QQDeBreathTool, extract the Windows ZIP, place the complete QQDeBreathTool directory where desired, then run QQDeBreathTool.exe. Keep _internal; the EXE alone cannot run. Keep an old app copy before upgrading, then replace the entire application directory instead of mixing runtimes. Python is not required.
+Mac: quit the old app, extract the matching ZIP using Archive Utility and copy QQDeBreathTool.app to Applications. Replace the old app, then launch. Preserve executable permissions and symbolic links; do not unpack on Windows before copying to Mac.
+Mac builds are ad-hoc signed, without Apple Developer ID notarization. Only after confirming the official release source, try right-click Open or the Privacy & Security system setting if blocked. If quarantine is the cause, enter xattr -dr com.apple.quarantine followed by a space in Terminal, drag in this trusted APP and press Return. Target only that app.
+
+Use: open or drop a vocal file, click Analyze, audition Voice / Breath / Noise, edit the regions, then export Vocal Only, Breath and Noise. Undo: Ctrl+Z; Redo: Ctrl+Shift+Z (Mac users can also use the interface buttons). Updating does not change original audio. Version 1.12 retains the 1.11 model and detection rules, speeds analysis and fixes progress-dialog completion reentrancy.
+For missing DLL/model/runtime errors, extract the complete archive again; do not run an EXE inside a ZIP. For silence, check audio-device and monitoring selections. Audition detection results before exporting.
+
+Qing Audio Non-Commercial Source-Share License 1.0 applies: NO COMMERCIAL USE. Distribution of original, binary or modified versions requires complete corresponding source at no charge, preserved attribution and license notices, clearly stated origin/changes and the same license for modified versions. Third-party components retain their own licenses.
+Complete source: QQDeBreathTool-1.12-Complete-Source.zip. GitHub automatic Source code (zip)/(tar.gz) downloads are also source, not installable applications.
+Source and license: https://github.com/Ziqing-Gu/QQDeBreathTool/tree/v1.12
+Release: https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12

@@ -1,10 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+import os
+import runpy
+from PyInstaller.config import CONF
+builder = runpy.run_path(os.path.join(SPECPATH, 'native', 'build_fp_control.py'))
+native_helper = builder['build'](os.path.join(CONF['workpath'], 'native'))
+
 a = Analysis(
     ['debreath_tool_app.py'],
     pathex=[],
-    binaries=[],
+    binaries=[(str(native_helper), 'qq_debreath/core')],
     datas=[('breath_frame_model.joblib', '.'), ('debreath_icon.ico', '.')],
     hiddenimports=[
         'debreath_tool_app',
@@ -43,6 +49,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='QQDeBreathTool',
+    version=os.path.join(SPECPATH, 'version_info.txt'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

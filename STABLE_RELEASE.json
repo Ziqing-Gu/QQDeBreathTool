@@ -1,0 +1,9 @@
+{
+  "product": "QQDeBreathTool standalone",
+  "version": "1.12",
+  "status": "Stable",
+  "userDesignated": true,
+  "designatedAt": "2026-10-27",
+  "previousDeliveredVersion": "1.11",
+  "binaryChangedForStableMarking": false
+}

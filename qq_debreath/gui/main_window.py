@@ -180,7 +180,8 @@ class CopyableLabel(QLabel):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("去呼吸 / 呼吸与噪音分离工具 1.11")
+        from qq_debreath import __version__
+        self.setWindowTitle(f"去呼吸 / 呼吸与噪音分离工具 {__version__}")
         self.setStyleSheet(APP_STYLESHEET)
         icon = app_icon_path()
         if icon:
@@ -521,11 +522,13 @@ class MainWindow(QMainWindow):
             self.analysis_cleanup()
 
     def analysis_progress_changed(self, value):
-        if self.analysis_progress is None:
+        progress = self.analysis_progress
+        if progress is None:
             return
         value = max(0, min(100, int(value)))
-        self.analysis_progress.setValue(value)
-        self.analysis_progress.setLabelText(f"正在分析 Breath... {value}%")
+        progress.setLabelText(f"正在分析 Breath... {value}%")
+        # Modal setValue processes events: completion may clear analysis_progress.
+        progress.setValue(value)
         QApplication.processEvents()
 
     def analysis_finished(self, regions):
