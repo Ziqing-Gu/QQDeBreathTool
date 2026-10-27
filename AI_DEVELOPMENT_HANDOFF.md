@@ -32,3 +32,14 @@ Standalone 1.12 Stable: 62 source files / 2121216 bytes; every copied file hash 
 ## 2026-10-27 — Illustrated standalone manuals
 
 User requested Chinese and English illustrated manuals for standalone 1.12. Each PDF has eight pages, with actual 1.12 widgets rendered offscreen using generated audio and manually placed regions. All 16 pages were rendered and visually reviewed. Manuals explicitly distinguish region Undo/Redo (up to 100 steps) from global parameters, startup session restoration from manually reopening a file, and monitoring controls from export processing. No product binary inputs changed. Formal Plan B remains frozen and is not refreshed for documentation. Mac workflow run 40512028581 succeeded for arm64 and x86_64 with architecture, version, model, ad-hoc signature and frozen CLI checks.
+
+## 2026-10-27 — Standalone 1.12 Stable Plan B/C/D complete
+
+Windows build, source-equivalence tests, GUI/CLI checks and installation were reused. One explicitly authorized Plan B completed and was frozen: 62 source files, 2,121,216 bytes, every copied hash matched. No later backup access or refresh was performed.
+
+Public product source/tag: 609e42096e066c9906daee8f3044af88d1b603f5 / v1.12. Illustrated manuals and packaged-source documentation: b6807a784a35594ad369a22bf10f2aaf3297d0e9. Mac run 40512028581 passed for arm64 and x86_64; artifact digests, APP structure/version/architecture, bundled model, ad-hoc signature and frozen CLI analysis were checked. Verified dependency minima: Apple Silicon macOS 12.3; Intel macOS 15.7. These packages do not claim older-system compatibility or interactive Mac listening acceptance.
+
+The Chinese and English illustrated PDFs each contain eight pages; all 16 pages were rendered and visually checked. The release has eight assets, all public downloads accessible with matching byte counts and SHA-256 digests. The complete desktop user package contains Windows, both Mac apps, bilingual installation guides and both manuals. A separate runnable Windows folder and both manuals were also delivered to the desktop.
+
+Release: https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12
+Version coverage: previous public 1.11 to current 1.12; included version 1.12; no omissions. All requested stages are complete. Future plugin work remains separate in QQEasyTool; this standalone app is not frozen by that plugin maintenance decision.
