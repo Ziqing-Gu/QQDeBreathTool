@@ -16,3 +16,5 @@ Mac 成品为 ad-hoc 签名，未做 Apple Developer ID 公证。如果系统阻
 完整源码：QQDeBreathTool-1.12-Complete-Source.zip。GitHub 自动 Source code (zip)/(tar.gz) 也是源码，均不是可运行程序。
 源码和许可：https://github.com/Ziqing-Gu/QQDeBreathTool/tree/v1.12
 正式下载：https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12
+
+Verified app minimum macOS / 已核验最低 macOS: arm64 12.3, x86_64 15.7.

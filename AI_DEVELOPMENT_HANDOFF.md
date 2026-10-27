@@ -28,3 +28,7 @@ The user explicitly selected standalone 1.12 as Stable and authorized one new Pl
 ## 2026-10-27 — Plan B complete and frozen
 
 Standalone 1.12 Stable: 62 source files / 2121216 bytes; every copied file hash matched. The backup is frozen. Later stages inherit this record without opening or refreshing the snapshot.
+
+## 2026-10-27 — Illustrated standalone manuals
+
+User requested Chinese and English illustrated manuals for standalone 1.12. Each PDF has eight pages, with actual 1.12 widgets rendered offscreen using generated audio and manually placed regions. All 16 pages were rendered and visually reviewed. Manuals explicitly distinguish region Undo/Redo (up to 100 steps) from global parameters, startup session restoration from manually reopening a file, and monitoring controls from export processing. No product binary inputs changed. Formal Plan B remains frozen and is not refreshed for documentation. Mac workflow run 40512028581 succeeded for arm64 and x86_64 with architecture, version, model, ad-hoc signature and frozen CLI checks.

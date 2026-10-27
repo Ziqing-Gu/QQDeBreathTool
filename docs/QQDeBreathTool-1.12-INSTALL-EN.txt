@@ -16,3 +16,5 @@ Qing Audio Non-Commercial Source-Share License 1.0 applies: NO COMMERCIAL USE. D
 Complete source: QQDeBreathTool-1.12-Complete-Source.zip. GitHub automatic Source code (zip)/(tar.gz) downloads are also source, not installable applications.
 Source and license: https://github.com/Ziqing-Gu/QQDeBreathTool/tree/v1.12
 Release: https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12
+
+Verified app minimum macOS / 已核验最低 macOS: arm64 12.3, x86_64 15.7.

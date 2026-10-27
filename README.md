@@ -25,8 +25,22 @@ WAV stems.
 
 ## 下载 / Download
 
-- 最新正式版 / Latest release: [QQDeBreathTool 1.11](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.11)
-- 全部历史版本 / All releases: [GitHub Releases](https://github.com/Ziqing-Gu/QQDeBreathTool/releases)
+**[QQDeBreathTool 1.12 Stable - 正式 Release / Latest release](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.12)**
+
+- Windows 10/11 x64 独立应用 / standalone app: [QQDeBreathTool-Windows-x64-1.12.zip](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-Windows-x64-1.12.zip)
+- M 系列 Mac / Apple Silicon app: [QQDeBreathTool-macOS-Apple-Silicon-1.12.zip](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-macOS-Apple-Silicon-1.12.zip)
+- Intel Mac 独立应用 / standalone app: [QQDeBreathTool-macOS-Intel-1.12.zip](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-macOS-Intel-1.12.zip)
+- 中文安装说明 / Chinese installation: [QQDeBreathTool-1.12-INSTALL-ZH-CN.txt](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-1.12-INSTALL-ZH-CN.txt)
+- 英文安装说明 / English installation: [QQDeBreathTool-1.12-INSTALL-EN.txt](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-1.12-INSTALL-EN.txt)
+- 中文图文手册 · 8 页 / illustrated Chinese manual: [QQDeBreathTool-1.12-User-Manual-ZH-CN.pdf](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-1.12-User-Manual-ZH-CN.pdf)
+- English illustrated manual · 8 pages: [QQDeBreathTool-1.12-User-Manual-EN.pdf](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-1.12-User-Manual-EN.pdf)
+- 完整对应源码 / complete corresponding source: [QQDeBreathTool-1.12-Complete-Source.zip](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/download/v1.12/QQDeBreathTool-1.12-Complete-Source.zip)
+
+选择与你的系统/芯片对应的一个程序包。GitHub 自动生成的 Source code (zip)/(tar.gz) 是源码，不是可运行程序。
+
+Choose one app package matching your system/chip. GitHub automatic Source code archives are not installable apps.
+
+[1.11 历史版本 / Previous release](https://github.com/Ziqing-Gu/QQDeBreathTool/releases/tag/v1.11) · [全部版本 / All releases](https://github.com/Ziqing-Gu/QQDeBreathTool/releases)
 
 ## Version
 
@@ -204,7 +218,7 @@ dist\QQDeBreathTool\QQDeBreathTool.exe
 
 Use Python 3.10 and `QQDeBreathTool-macos.spec` on a native Apple Silicon or Intel runner. The `release-standalone-112.yml` workflow builds both app architectures and checks versions, executable architectures, bundled model, signature and frozen CLI analysis. The Windows build is reused from the verified local 1.12 delivery. Existing contributor workflows remain unchanged; release commits skip push CI and the Mac release workflow is dispatched explicitly.
 
-See [BUILD](BUILD.md) and the bilingual guides under [docs](docs). The Windows-only FP helper is intentionally absent on Mac. Performance gains on Mac have not been benchmarked on the private recordings. macOS 11 or newer is the intended minimum; platform and dependency requirements are checked during packaging. Developer ID signing/notarization and interactive Mac listening acceptance are not claimed.
+See [BUILD](BUILD.md) and the bilingual guides under [docs](docs). The Windows-only FP helper is intentionally absent on Mac. Performance gains on Mac have not been benchmarked on the private recordings. Verified dependency minimum macOS: arm64 12.3, x86_64 15.7. Developer ID signing/notarization and interactive Mac listening acceptance are not claimed.
 
 ## 许可证 / License
 
